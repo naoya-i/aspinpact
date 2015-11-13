@@ -26,6 +26,10 @@ def _getWNpos(p):
     return p
 
 
+def _sanitize(l):
+    return l.replace(".", "_").replace("-", "_")
+
+
 def collectOntological(sent):
     concepts = []
 
@@ -39,9 +43,7 @@ def collectOntological(sent):
             # print "%s_n(X) :- %s_n(X)." % (ner.lower(), lemma.lower())
 
             concepts += [("%s_n" % lemma.lower(), word, ner)]
-
-            if "O" != ner:
-                concepts += [("%s_n" % ner.lower(), ner, "O")]
+            concepts += [("%s_n" % ner.lower(), ner, "O")]
 
         elif pos.startswith("NN") or pos.startswith("VB") or pos.startswith("JJ"):
 
@@ -78,26 +80,22 @@ def collectMentions(sent):
         pos   = tok.xpath("./POS/text()")[0]
 
         if pos.startswith("NN"):
-            if tok.getnext().xpath("./POS/text()")[0].startswith("NN"):
-                continue
-                
-            var = "m_%s_%s" % (tok.attrib["id"], text)
+            var = "m_%s_%s" % (tok.attrib["id"], _sanitize(text))
             mention2const[tok.attrib["id"]] = "M", var
 
-            print "mention(%s). position(%s, %s). %s_n(%s). %s(%s)." % (
+            print "mention(%s). %s_n(%s). %s(%s)." % (
                 var,
-                var, tok.attrib["id"],
-                lemma, var,
+                _sanitize(lemma), var,
                 "plural" if pos.endswith("S") else "singular", var,
             )
 
         if pos.startswith("VB") or pos.startswith("JJ"):
             # if lemma == "be": continue
 
-            var = "e_%s_%s" % (tok.attrib["id"], text)
+            var = "e_%s_%s" % (tok.attrib["id"], _sanitize(text))
             mention2const[tok.attrib["id"]] = "E", var
 
-            print "event(%s). %s_%s(%s)." % (var, lemma, pos[0].lower(), var)
+            print "event(%s). %s_%s(%s)." % (var, _sanitize(lemma), pos[0].lower(), var)
 
     return mention2const
 
@@ -114,24 +112,22 @@ def collectEventRels(sent, mention2const):
             lemma = sent.xpath("./tokens/token[@id=%s]/lemma/text()" % de)[0]
             word = sent.xpath("./tokens/token[@id=%s]/word/text()" % de)[0]
 
-            print "1 {pronominalized(X, tok_%s_%s): mention(X), position(X, Y), Y<%s} 1." % (de, word.lower(), de)
-
-            try:
-                print "3 {%s(X); %s(X); %s(%s, X)} :- pronominalized(X, tok_%s_%s)." % (
-                    _getNumber(lemma),
-                    _getGender(lemma),
-                    dt, mention2const[gov][1],
-                    de, word.lower(),
+            print "pronoun(tok_%s_%s)." % (de, word.lower())
+            print "position(tok_%s_%s, %s)." % (de, word.lower(), de)
+            print "1 {pronominalized(X, tok_%s_%s): mention(X)} 1." % (de, word.lower())
+            print "3 {%s(X); %s(X); %s(%s, X)} :- pronominalized(X, tok_%s_%s)." % (
+                _getNumber(lemma),
+                _getGender(lemma),
+                dt, mention2const[gov][1],
+                de, word.lower(),
                 )
-            except KeyError:
-                print >>sys.stderr, "Error!", dt, gov, de
 
         else:
             try:
                 print "%s(%s, %s)." % (dt, mention2const[gov][1], mention2const[de][1])
 
             except KeyError:
-                print >>sys.stderr, "Error!", dt, gov, de
+                print >>sys.stderr, "Error!"
 
 
 def collectFeatures(sent, mention2const, concepts):
@@ -166,11 +162,11 @@ def collectFeatures(sent, mention2const, concepts):
                 if sps[1] < 1: continue
 
                 print ":~ %s(E), %s(E, X), %s(X). [%d@1, selpref, %s_x_%s_x_%s, X, E] %% %s, %s, %s" % (
-                    cv,
+                    _sanitize(cv),
                     dt.replace(":", "_"),
-                    cn,
+                    _sanitize(cn),
                     int(-1000*sps[0]),
-                    cv, dt.replace(":", "_"), cn,
+                    _sanitize(cv), dt.replace(":", "_"), _sanitize(cn),
                     v, r, n,
                 )
 
@@ -180,26 +176,26 @@ def collectFeatures(sent, mention2const, concepts):
             for dt2 in relations:
                 for cv2, cv2w, cv2ner in concepts:
                     if cv == cv2: continue
-    
+
                     if not cv2.endswith("_v") and not cv2.endswith("_j"): continue
-    
+
                     e1, e2 = "%s:%s" % (cv.replace("_", "-"), dt.replace("nmod:", "prep_")), \
                              "%s:%s" % (cv2.replace("_", "-"), dt2.replace("nmod:", "prep_"))
-    
+
                     if e1 > e2: e1, e2 = e2, e1
                     if tried_esa.has_key((e1, e2)): continue
-    
+
                     tried_esa[(e1, e2)] = 1
-    
-                    # if nc.getFreq(e1, e2) < 10: continue
-    
+
+                    #if nc.getFreq(e1, e2) < 10: continue
+
                     ncs = nc.getPMI(e1, e2)
-    
+
                     print ":~ %s(E1), %s(E1, X), %s(E2), %s(E2, X). [%d@1, esa, %s_x_%s_x_%s_x_%s, X, E1, E2]" % (
-                        cv, dt.replace(":", "_"),
-                        cv2, dt2.replace(":", "_"),
+                        _sanitize(cv), dt.replace(":", "_"),
+                        _sanitize(cv2), dt2.replace(":", "_"),
                         int(-1000*ncs),
-                        cv, dt.replace(":", "_"), cv2, dt2.replace(":", "_"),
+                        _sanitize(cv), dt.replace(":", "_"), _sanitize(cv2), dt2.replace(":", "_"),
                     )
 
 

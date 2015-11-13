@@ -5,6 +5,9 @@ CORENLP2PL=python src/cc.py
 # My precious...
 .PRECIOUS: %.eval %.sys.interp %.possible %.pl %.txt.corenlp.xml
 
+%.clean:
+	rm $(subst .clean,.possible,$@) $(subst .clean,.eval,$@) $(subst .clean,.sys.interp,$@) $(subst .clean,.pl,$@)
+
 %.eval: %.sys.interp
 	python src/compareInterp.py $(subst .sys.,.gold.,$<) $< > $@
 
