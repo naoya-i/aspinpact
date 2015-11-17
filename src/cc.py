@@ -40,7 +40,7 @@ def collectOntological(sent):
         ner   = tok.xpath("./NER/text()")[0]
 
         if pos.startswith("NNP"):
-            # print "%s_n(X) :- %s_n(X)." % (ner.lower(), lemma.lower())
+            print "%s_n(X) :- %s_n(X), use_ner." % (ner.lower(), _sanitize(lemma.lower()))
 
             concepts += [("%s_n" % lemma.lower(), word, ner)]
             concepts += [("%s_n" % ner.lower(), ner, "O")]
@@ -57,11 +57,9 @@ def collectOntological(sent):
             except nltk.corpus.reader.wordnet.WordNetError:
                 continue
 
-            continue
-
             for sh in s.hypernyms():
                 for lmh in sh.lemma_names():
-                    print "%s_%s(X) :- %s_%s(X)." % (lmh.lower(), pos[0].lower(), lemma.lower(), pos[0].lower(), )
+                    print "%s_%s(X) :- %s_%s(X), use_hypernym." % (_sanitize(lmh.lower()), pos[0].lower(), _sanitize(lemma.lower()), pos[0].lower(), )
 
                     concepts += [("%s_%s" % (lmh.lower(), pos[0].lower()), lmh, ner)]
 
@@ -83,10 +81,11 @@ def collectMentions(sent):
             var = "m_%s_%s" % (tok.attrib["id"], _sanitize(text))
             mention2const[tok.attrib["id"]] = "M", var
 
-            print "mention(%s). %s_n(%s). %s(%s)." % (
+            print "mention(%s). %s_n(%s). %s(%s). position(%s, %s)." % (
                 var,
                 _sanitize(lemma), var,
                 "plural" if pos.endswith("S") else "singular", var,
+                var, tok.attrib["id"],
             )
 
         if pos.startswith("VB") or pos.startswith("JJ"):
@@ -131,10 +130,10 @@ def collectEventRels(sent, mention2const):
 
 
 def collectFeatures(sent, mention2const, concepts):
-    sp = selpref.selpref_t(pathKB="/work/jun-s/kb")
+    sp = selpref.selpref_t(pathKB="/work/naoya-i/kb")
     nc = ncnaive.ncnaive_t(
-        "/work/jun-s/kb/corefevents.0901.exact.cdblist.ncnaive.0.cdb",
-        "/work/jun-s/kb/corefevents.0901.exact.cdblist.tuples.cdb")
+        "/work/naoya-i/kb/corefevents.0901.exact.cdblist.ncnaive.0.cdb",
+        "/work/naoya-i/kb/corefevents.0901.exact.cdblist.tuples.cdb")
 
     relations = [
         dt for dt in sent.xpath("./dependencies[@type='collapsed-ccprocessed-dependencies']/dep/@type")
@@ -161,11 +160,11 @@ def collectFeatures(sent, mention2const, concepts):
 
                 if sps[1] < 1: continue
 
-                print ":~ %s(E), %s(E, X), %s(X). [%d@1, selpref, %s_x_%s_x_%s, X, E] %% %s, %s, %s" % (
+                print ":~ %s(E), %s(E, X), %s(X). [f_selpref(%f)@1, %s_x_%s_x_%s, X, E] %% %s, %s, %s" % (
                     _sanitize(cv),
                     dt.replace(":", "_"),
                     _sanitize(cn),
-                    int(-1000*sps[0]),
+                    -1.0*sps[0],
                     _sanitize(cv), dt.replace(":", "_"), _sanitize(cn),
                     v, r, n,
                 )
@@ -187,14 +186,14 @@ def collectFeatures(sent, mention2const, concepts):
 
                     tried_esa[(e1, e2)] = 1
 
-                    #if nc.getFreq(e1, e2) < 10: continue
+                    if nc.getFreq(e1, e2) < 1: continue
 
                     ncs = nc.getPMI(e1, e2)
 
-                    print ":~ %s(E1), %s(E1, X), %s(E2), %s(E2, X). [%d@1, esa, %s_x_%s_x_%s_x_%s, X, E1, E2]" % (
+                    print ":~ %s(E1), %s(E1, X), %s(E2), %s(E2, X). [f_esa(%f)@1, esa, %s_x_%s_x_%s_x_%s, X, E1, E2]" % (
                         _sanitize(cv), dt.replace(":", "_"),
                         _sanitize(cv2), dt2.replace(":", "_"),
-                        int(-1000*ncs),
+                        -1.0*ncs,
                         _sanitize(cv), dt.replace(":", "_"), _sanitize(cv2), dt2.replace(":", "_"),
                     )
 
