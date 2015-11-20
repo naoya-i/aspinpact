@@ -61,6 +61,9 @@ def collectOntological(sent):
                 for lmh in sh.lemma_names():
                     print "%s_%s(X) :- %s_%s(X), use_hypernym." % (_sanitize(lmh.lower()), pos[0].lower(), _sanitize(lemma.lower()), pos[0].lower(), )
 
+                    print "{%s_%s(X)} :- %s_%s(X), use_loose_hypernym." % (_sanitize(lmh.lower()), pos[0].lower(), _sanitize(lemma.lower()), pos[0].lower(), )
+                    print ":~ %s_%s(X), %s_%s(X), use_loose_hypernym. [f_loose_hyp(-1)@1, X]" % (_sanitize(lmh.lower()), pos[0].lower(), _sanitize(lemma.lower()), pos[0].lower(), )
+
                     concepts += [("%s_%s" % (lmh.lower(), pos[0].lower()), lmh, ner)]
 
     return concepts
@@ -132,8 +135,8 @@ def collectEventRels(sent, mention2const):
 def collectFeatures(sent, mention2const, concepts):
     sp = selpref.selpref_t(pathKB="/work/naoya-i/kb")
     nc = ncnaive.ncnaive_t(
-        "/work/naoya-i/kb/corefevents.0901.exact.cdblist.ncnaive.0.cdb",
-        "/work/naoya-i/kb/corefevents.0901.exact.cdblist.tuples.cdb")
+        "/work/naoya-i/kb/ncnaive0909.0.cdb",
+        "/work/naoya-i/kb/tuples.0909.tuples.cdb")
 
     relations = [
         dt for dt in sent.xpath("./dependencies[@type='collapsed-ccprocessed-dependencies']/dep/@type")
@@ -164,7 +167,7 @@ def collectFeatures(sent, mention2const, concepts):
                     _sanitize(cv),
                     dt.replace(":", "_"),
                     _sanitize(cn),
-                    -1.0*sps[0],
+                    1.0*sps[0],
                     _sanitize(cv), dt.replace(":", "_"), _sanitize(cn),
                     v, r, n,
                 )
@@ -193,7 +196,7 @@ def collectFeatures(sent, mention2const, concepts):
                     print ":~ %s(E1), %s(E1, X), %s(E2), %s(E2, X). [f_esa(%f)@1, esa, %s_x_%s_x_%s_x_%s, X, E1, E2]" % (
                         _sanitize(cv), dt.replace(":", "_"),
                         _sanitize(cv2), dt2.replace(":", "_"),
-                        -1.0*ncs,
+                        1.0*ncs,
                         _sanitize(cv), dt.replace(":", "_"), _sanitize(cv2), dt2.replace(":", "_"),
                     )
 

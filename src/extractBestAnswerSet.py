@@ -9,7 +9,7 @@ def extractBestAnswerSet(target):
 
         for i, answerset, cost in re.findall("Answer: ([0-9]+)\n(.*?)\nOptimization: (.*?)\n", target):
             if cost == optimumCost:
-                return answerset.split(" ")
+                return int(optimumCost), answerset.split(" ")
 
 def extractAnswerSets(target):
     return [(int(m.group(2)), m.group(1).split(" "))
