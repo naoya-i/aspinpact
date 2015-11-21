@@ -80,7 +80,7 @@ class answerset_ranker_t:
 
                     # # Initialization.
                     if 0.0 == self.coef_[fidx]:
-                        self.coef_[fidx] = 0 # random.random() # *2.0
+                        self.coef_[fidx] = 0 # random.random()*0.1 # *2.0
 
                     print >>tmpf, "%% %.3f x %f" % (self.coef_[fidx], fvalue)
                     print >>tmpf, "f_%s(%s, %s) :- %s" % (fname, _sanitize(fvalue), binder, constraint)
@@ -139,7 +139,7 @@ class answerset_ranker_t:
         if not self.updateAlg.startswith("batch"): return
 
         if "batch" == self.updateAlg:
-            self.grbconstr += self.numFedExamples * 1.0*self.grbvarSlack
+            self.grbconstr += self.numFedExamples*self.grbvarSlack
             self.grbopt.addConstr(self.grbconstr, gp.GRB.GREATER_EQUAL, self.grbloss)
             
             obj = gp.QuadExpr()
@@ -152,12 +152,15 @@ class answerset_ranker_t:
             self.grbopt.setObjective(obj)
             self.grbopt.optimize()
 
+            bfcoef = self.coef_.copy()
+            
             for i, v_i in enumerate(self.grbvars):
                 self.coef_[i] = v_i.x
 
-            isConverged = self.accumulatedLoss >= self.grbloss - self.numFedExamples*(self.grbvarSlack.x-self.epsilon)
-            
-            print >>sys.stderr, "COEF:", self.coef_
+            isConverged = np.array_equal(bfcoef, self.coef_)
+
+            ## Needs to be checked after the update.
+            ## (self.accumulatedLoss >= self.grbloss - self.numFedExamples*(self.grbvarSlack.x-self.epsilon))
             
             self.grbconstr = gp.LinExpr()
             self.grbloss   = 0
@@ -183,32 +186,6 @@ class answerset_ranker_t:
 
         myloss, diff = 0.0, np.array([0.0] * self.coef_.shape[0])
 
-        if self.updateAlg.startswith("batch_exact"):
-            for c, a in self.predict(aspfiles, enum=True):
-                f = _getFeatureVector(a)
-                f = self.dv.transform(f).toarray()[0]
-
-                if set(goldAtoms).issubset(set(a)):
-                    diff = diff-f
-
-                else:
-                    diff = diff+f
-
-            if np.dot(diff, self.coef_) + 1 > 0:
-                constr = gp.LinExpr()
-
-                for i, v_i in enumerate(self.coef_):
-                    constr += self.grbvars[i]*-diff[i]
-
-                constr += self.grbvarSlack*1.0
-
-                self.grbopt.addConstr(constr, gp.GRB.GREATER_EQUAL, 1.0)
-                
-                self.batch_sumFeatureVector = self.batch_sumFeatureVector + diff
-                myloss = np.dot(diff, self.coef_)
-            
-            return answerset_ranker_t.UPDATED, myloss, diff
-            
         # First, guess what.
         predictions = self.predict(aspfiles, goldAtoms, lossAugmented=True)
 
@@ -256,7 +233,7 @@ class answerset_ranker_t:
                 self.grbconstr += self.grbvars[i]*(npGoal[0, i] - npCurrent[0, i])
                 self.accumulatedLoss += v_i*(npGoal[0, i] - npCurrent[0, i])
                 
-            self.grbloss += math.sqrt(len(set(goldAtoms) - set(pCurrent)))
+            self.grbloss += len(set(goldAtoms) - set(pCurrent))
 
             myloss = math.sqrt(len(set(goldAtoms) - set(pCurrent)))
 
