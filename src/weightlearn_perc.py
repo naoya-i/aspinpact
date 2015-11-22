@@ -34,25 +34,29 @@ def main(options, args):
     for qid, fn in enumerate(args):
         _collectFeatures(features, fn)
 
-    print >>sys.stderr, "Features:", " ".join(features.keys())
+    print >>sys.stderr, "Features: %d features were detected." % len(features.keys())
 
     ranker.set_features(features)
 
     # Start learning.
+    xmRoot = etree.Element("root")
+    
     try:
-        xmRet = _learn(options, args, ranker)
+        _learn(xmRoot, options, args, ranker)
 
     except KeyboardInterrupt:
         print >>sys.stderr, "Aborted."
-    
-    print etree.tostring(xmRet, pretty_print=True)
+
+    fsOut = sys.stdout if None == options.output else open(options.output, "w")
+
+    if None != options.output:
+        print >>sys.stderr, "Writing to %s..." % options.output
+        
+    print >>fsOut, etree.tostring(xmRoot, pretty_print=True)
 
 
-def _learn(options, args, ranker):
-    xmRoot = etree.Element("root")
-
-    xmParams = etree.Element("params", C=str(ranker.C), eta=str(ranker.eta), algo=ranker.updateAlg)
-    xmRoot.append(xmParams)
+def _learn(xmRoot, options, args, ranker):
+    xmRoot.append(_writeParams(ranker))
 
     isConverged = False
 
@@ -124,7 +128,7 @@ def _learn(options, args, ranker):
 
             print >>sys.stderr, "acc. =", xmAccuracy.attrib["accuracy"]
                     
-    return xmRoot
+    return
 
 
 def _writeLoss(stat, loss):
@@ -149,7 +153,13 @@ def _writeWeightVector(v):
     e = etree.Element("weight")
     e.text = str(v)
     return e
-    
+
+def _writeParams(ranker):
+    return etree.Element("params",
+                         C=str(ranker.C),
+                         eta=str(ranker.eta),
+                         algo=ranker.updateAlg)
+
 def _collectFeatures(outdict, fn):
     for ln in open(fn):
         m = re.search("\[f_(.*?)\([-0-9e.]+\)@", ln)
@@ -168,6 +178,7 @@ def _readWeight(fn):
 if "__main__" == __name__:
     cmdparser = optparse.OptionParser(description="Weight Learner for ASP.")
     cmdparser.add_option("--preamble", help="")
+    cmdparser.add_option("--output", help="")
     cmdparser.add_option("--algo", default="batch", help="")
     cmdparser.add_option("--iter", type=int, default=5, help="The number of iterations.")
     cmdparser.add_option("--C", type=float, default=0.01)

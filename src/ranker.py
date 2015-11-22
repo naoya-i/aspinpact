@@ -50,8 +50,18 @@ class answerset_ranker_t:
         
         for i in xrange(self.coef_.shape[0]):
             self.grbvars += [self.grbopt.addVar(-gp.GRB.INFINITY, gp.GRB.INFINITY, 0.0, gp.GRB.CONTINUOUS, "w_%d" % i)]
-
+            
         self.grbopt.update()
+
+        #
+        # Construct objective function.
+        obj = gp.QuadExpr()
+        for i, w_i in enumerate(self.coef_):
+            obj += 0.5*self.grbvars[i]*self.grbvars[i]
+        obj += self.C*self.grbvarSlack
+
+        self.grbopt.setObjective(obj)
+            
         self.grbconstr = gp.LinExpr()
         self.grbloss = 0
         self.numFedExamples = 0
@@ -80,7 +90,7 @@ class answerset_ranker_t:
 
                     # # Initialization.
                     if 0.0 == self.coef_[fidx]:
-                        self.coef_[fidx] = 0 # random.random()*0.1 # *2.0
+                        self.coef_[fidx] = 1 # random.random()*0.1 # *2.0
 
                     print >>tmpf, "%% %.3f x %f" % (self.coef_[fidx], fvalue)
                     print >>tmpf, "f_%s(%s, %s) :- %s" % (fname, _sanitize(fvalue), binder, constraint)
@@ -97,6 +107,9 @@ class answerset_ranker_t:
                 for a in goldAtoms:
                     print >>tmpf, ":~ not %s. [-1@1, lossaug_%s]" % (a, re.sub("[\(\),]", "_", a))
 
+                # print >>tmpf, "correct :- %s." % (", ".join([a for a in goldAtoms]))
+                # print >>tmpf, ":- correct."
+                    
             else:
                 print >>tmpf, "correct :- %s." % (", ".join([a for a in goldAtoms]))
 
@@ -140,23 +153,22 @@ class answerset_ranker_t:
 
         if "batch" == self.updateAlg:
             self.grbconstr += self.numFedExamples*self.grbvarSlack
-            self.grbopt.addConstr(self.grbconstr, gp.GRB.GREATER_EQUAL, self.grbloss)
+            self.grbopt.addConstr(self.grbconstr >= self.grbloss, "margin")
+            self.grbopt.update()
+
+            # print >>sys.stderr, self.grbconstr
+            print >>sys.stderr, self.grbopt.getConstrs()
             
-            obj = gp.QuadExpr()
-
-            for i, w_i in enumerate(self.coef_):
-                obj += 0.5*self.grbvars[i]*self.grbvars[i]
-
-            obj += self.C*self.grbvarSlack
-
-            self.grbopt.setObjective(obj)
+            self.grbopt.reset()
             self.grbopt.optimize()
-
+            
             bfcoef = self.coef_.copy()
             
             for i, v_i in enumerate(self.grbvars):
                 self.coef_[i] = v_i.x
 
+            print >>sys.stderr, "VAL:", self.grbconstr.getValue(), "SLACK:", self.grbvarSlack.x, "COEF:", self.coef_
+            
             isConverged = np.array_equal(bfcoef, self.coef_)
 
             ## Needs to be checked after the update.
@@ -193,9 +205,8 @@ class answerset_ranker_t:
             return answerset_ranker_t.CANNOT_PREDICT, 0.0, None
 
         pCurCost, pCurrent = predictions[0]
-        vCurrent = _getFeatureVector(pCurrent)
-
-        self.numFedExamples += 1
+        vCurrent = _getFeatureVector(pCurrent, self.dv)
+        vCurrent /= np.linalg.norm(vCurrent.toarray()[0])
         
         # Is the guess correct?
         if set(goldAtoms).issubset(set(pCurrent)):
@@ -210,7 +221,8 @@ class answerset_ranker_t:
         for c, a in goals:
             if set(goldAtoms).issubset(set(a)):
                 pGoalCost, pGoal = c, a
-                vGoal = _getFeatureVector(pGoal)
+                vGoal = _getFeatureVector(pGoal, self.dv)
+                vGoal /= np.linalg.norm(vGoal.toarray()[0])
                 break
 
         if None == pGoal:
@@ -220,7 +232,6 @@ class answerset_ranker_t:
         assert(not set(goldAtoms).issubset(set(pCurrent)))
         assert(set(goldAtoms).issubset(set(pGoal)))
 
-        npCurrent, npGoal = self.dv.transform([vCurrent, vGoal])
         myloss, diff = 0.0, np.array([0.0]*self.coef_)
 
         def loss(w, c, g):
@@ -229,17 +240,21 @@ class answerset_ranker_t:
             return max(0, prior + likeli)
         
         if self.updateAlg.startswith("batch"):
+            self.numFedExamples += 1
+
+            myloss = 0
+            
             for i, v_i in enumerate(self.coef_):
-                self.grbconstr += self.grbvars[i]*(npGoal[0, i] - npCurrent[0, i])
-                self.accumulatedLoss += v_i*(npGoal[0, i] - npCurrent[0, i])
+                self.grbconstr += self.grbvars[i]*(vGoal[0, i] - vCurrent[0, i])
+                myloss += v_i*(vCurrent[0, i] - vGoal[0, i])
                 
             self.grbloss += len(set(goldAtoms) - set(pCurrent))
 
-            myloss = math.sqrt(len(set(goldAtoms) - set(pCurrent)))
+            # myloss = math.sqrt(len(set(goldAtoms) - set(pCurrent)))
 
         elif "structperc" == self.updateAlg:
-            diff   = grad(loss)(self.coef_, npCurrent.toarray()[0], npGoal.toarray()[0])
-            myloss = loss(self.coef_, npCurrent.toarray()[0], npGoal.toarray()[0])
+            diff   = grad(loss)(self.coef_, vCurrent.toarray()[0], vGoal.toarray()[0])
+            myloss = loss(self.coef_, vCurrent.toarray()[0], vGoal.toarray()[0])
 
             # Update the weight vector.
             for i, v_i in enumerate(diff):
@@ -250,7 +265,7 @@ class answerset_ranker_t:
 
         elif self.updateAlg in ["PA-I", "PA-II"]:
             # See Crammer et al. 2006 for more details.
-            w, c, g = self.coef_, npCurrent.toarray()[0], npGoal.toarray()[0]
+            w, c, g = self.coef_, vCurrent.toarray()[0], vGoal.toarray()[0]
             myloss = np.dot(w, c) - np.dot(w, g) + math.sqrt(len(set(goldAtoms) - set(pCurrent)))
             norm2 = np.linalg.norm(g - c) ** 2
 
@@ -267,14 +282,14 @@ class answerset_ranker_t:
             self.coef_ = self.coef_ + tau * (g - c)
 
             # Make sure that the difference.
-            # print >>sys.stderr, "DIFF", np.dot(self.coef_.toarray()[0], npGoal.toarray()[0]) - np.dot(self.coef_.toarray()[0], npCurrent.toarray()[0])
+            # print >>sys.stderr, "DIFF", np.dot(self.coef_.toarray()[0], vGoal.toarray()[0]) - np.dot(self.coef_.toarray()[0], vCurrent.toarray()[0])
             # print >>sys.stderr, "LOSS", math.sqrt(len(set(goldAtoms) - set(pCurrent)))
 
         return answerset_ranker_t.UPDATED, myloss, diff
 
 #
 # Helper functions.
-def _getFeatureVector(answerset):
+def _getFeatureVector(answerset, dv):
     vec = collections.defaultdict(float)
     regexWeakConstraint = re.compile("f_(.*?)\((.*?),")
 
@@ -285,7 +300,7 @@ def _getFeatureVector(answerset):
             fname, fvalue = m.group(1), float(_drink(m.group(2)))
             vec[fname] += 1.0 * fvalue
 
-    return vec
+    return dv.transform(vec)
 
 
 def _sanitize(f):

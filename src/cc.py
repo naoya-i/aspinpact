@@ -5,6 +5,7 @@ import collections
 sys.path += ["/home/naoya-i/work/clone/wsc/src"]
 import selpref
 import ncnaive
+import googlengram
 import nltk
 
 from lxml import etree
@@ -123,7 +124,7 @@ def collectEventRels(sent, mention2const):
                 dt, mention2const[gov][1],
                 de, word.lower(),
                 )
-
+            
         else:
             try:
                 print "%s(%s, %s)." % (dt, mention2const[gov][1], mention2const[de][1])
@@ -144,6 +145,20 @@ def collectFeatures(sent, mention2const, concepts):
 
     tried_esa = {}
 
+    # Surface features.
+    print >>sys.stderr, mention2const
+    
+    for tok in sent.xpath("./tokens/token[./POS/text()='PRP']"):
+        for m in mention2const:
+            if mention2const[m][0] != "M": continue
+
+            print ":~ pronominalized(%s, tok_%s_%s). [f_surf_%s_%s(1)@1, surf_%s_%s] " % (
+                mention2const[m][1],
+                tok.attrib["id"], tok.xpath("./word/text()")[0],
+                mention2const[m][1].split("_")[-1], tok.xpath("./word/text()")[0],
+                mention2const[m][1].split("_")[-1], tok.xpath("./word/text()")[0],
+                )
+    
     for dt in relations:
         for cv, cvw, cvner in concepts:
             if not cv.endswith("_v") and not cv.endswith("_j"): continue
