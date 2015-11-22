@@ -47,7 +47,6 @@ class answerset_ranker_t:
     def setupFeatures(self):
         self.dv.fit([self.features])
         self.coef_ = np.array([0.0]*len(self.features.keys()))
-        self.adagrad = np.array([0.0]*self.coef_.shape[0])
 
         for i in xrange(self.coef_.shape[0]):
             self.coef_[i] = self.weightInitializer(i)
@@ -183,20 +182,17 @@ class answerset_ranker_t:
 
     def feed(self, aspfiles, goldAtoms):
 
-        myloss, diff = 0.0, np.array([0.0] * self.coef_.shape[0])
-
         # First, guess what.
         predictions = self.predict(aspfiles)
 
         if 0 == len(predictions):
-            return answerset_ranker_t.CANNOT_PREDICT, 0.0, None
+            return answerset_ranker_t.CANNOT_PREDICT, 0.0
 
         pCurCost, pCurrent = predictions[0]
-        vCurrent = self.getFeatureVector(pCurrent)
         
         # Is the guess correct?
         if set(goldAtoms).issubset(set(pCurrent)):
-            return answerset_ranker_t.CORRECT, 0.0, None
+            return answerset_ranker_t.CORRECT, 0.0
 
         # Guess correct label.
         goals = self.predict(aspfiles, goldAtoms)
@@ -207,53 +203,44 @@ class answerset_ranker_t:
         for c, a in goals:
             if set(goldAtoms).issubset(set(a)):
                 pGoalCost, pGoal = c, a
-                vGoal = self.getFeatureVector(pGoal)
                 break
 
         if None == pGoal:
-            return answerset_ranker_t.NO_LVC, 0.0, None
+            return answerset_ranker_t.NO_LVC, 0.0
 
         # If it is not inferred, then give up.
         assert(not set(goldAtoms).issubset(set(pCurrent)))
         assert(set(goldAtoms).issubset(set(pGoal)))
 
-        myloss, diff = 0.0, np.array([0.0]*self.coef_)
-       
-        if "structperc" == self.updateAlg:
-            diff   = (vGoal - vCurrent).toarray()[0]
-            myloss = len(set(goldAtoms) - set(pCurrent))
+        return self._updateWeights(pCurrent, pGoal, goldAtoms)
 
-            # Update the weights.            
-            for i, v_i in enumerate(diff):
-                self.adagrad[i] += v_i*v_i
-                self.coef_[i] += v_i # self.eta/math.sqrt(1+self.adagrad[i])*v_i
+        
+    def _updateWeights(self, pCurrent, pGoal, pCurrent):
+        vCurrent, vGoal = self.getFeatureVector(pCurrent), self.getFeatureVector(pGoal)
+        
+        if "latperc" == self.updateAlg:
+            self.coef_[i] += (vGoal - vCurrent).toarray()[0]
 
-            # self.coef_avg_ += [self.coef_.copy()]
-                
+            return answerset_ranker_t.UPDATED, len(set(goldAtoms) - set(pCurrent))
                     
         elif self.updateAlg in ["PA-I", "PA-II"]:
-            # See Crammer et al. 2006 for more details.
             w, c, g = self.coef_, vCurrent.toarray()[0], vGoal.toarray()[0]
-            myloss = np.dot(w, c) - np.dot(w, g) + math.sqrt(len(set(goldAtoms) - set(pCurrent)))
-            norm2 = np.linalg.norm(g - c) ** 2
+            diff    = g - c
+            loss = np.dot(w, c) - np.dot(w, g) + math.sqrt(len(set(goldAtoms) - set(pCurrent)))
+            norm2 = np.linalg.norm(diff) ** 2
 
             if norm2 == 0.0:
-                return answerset_ranker_t.INDISTINGUISHABLE, 0.0, diff # Cannot update.
+                return answerset_ranker_t.INDISTINGUISHABLE, 0.0 # Cannot update.
 
-            if "PA-I" == self.updateAlg:
-                tau = min(self.C, myloss / norm2)
-
-            elif "PA-II" == self.updateAlg:
-                tau = myloss / (norm2 + 1.0/(2*self.C))
+            if "PA-I" == self.updateAlg:    tau = min(self.C, loss / norm2)
+            elif "PA-II" == self.updateAlg: tau = loss / (norm2 + 1.0/(2*self.C))
 
             # Update the weights.
-            self.coef_ = self.coef_ + tau * (g - c)
+            self.coef_ = self.coef_ + tau * diff
 
+            return answerset_ranker_t.UPDATED, loss
 
-        else:
-            raise "Unsupported algorithm: %s" % self.updateAlg
-
-        return answerset_ranker_t.UPDATED, myloss, diff
+        raise "Unsupported algorithm: %s" % self.updateAlg
 
 #
 # Helper functions.

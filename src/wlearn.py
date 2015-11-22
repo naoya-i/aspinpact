@@ -86,7 +86,7 @@ def _learn(xmRoot, options, args, ranker):
             if isUpdating:
                 
                 # Feed the example to the learner.
-                ret, myloss, mydiff = ranker.feed(aspfiles, goldAtoms)
+                ret, myloss = ranker.feed(aspfiles, goldAtoms)
 
                 if options.debug:
                     xmProblemwise = etree.Element("problemwise", loss="%.2f" % myloss)
