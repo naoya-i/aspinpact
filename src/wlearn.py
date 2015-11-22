@@ -20,6 +20,7 @@ from extractBestAnswerSet import *
 def main(options, args):
     ranker = answerset_ranker_t(
         rescaling=not options.no_rescaling,
+        normalization=not options.no_normalization,
         C=options.C,
         eta=options.eta,
         epsilon=options.epsilon,
@@ -180,6 +181,7 @@ if "__main__" == __name__:
     cmdparser.add_option("--C", type=float, default=0.01)
     cmdparser.add_option("--eta", type=float, default=0.1)
     cmdparser.add_option("--no-rescaling", action="store_true")
+    cmdparser.add_option("--no-normalization", action="store_true")
     cmdparser.add_option("--epsilon", type=float, default=0.001, help="The number of iterations.")
     cmdparser.add_option("--debug", action="store_true")
 

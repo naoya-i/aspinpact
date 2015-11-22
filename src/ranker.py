@@ -25,7 +25,9 @@ class answerset_ranker_t:
     INDISTINGUISHABLE = 3
     CANNOT_PREDICT = 4
 
-    def __init__(self, eta=0.01, C = 0.0001, epsilon=0.01, alg="structperc", rescaling=True):
+    def __init__(self, eta=0.01, C = 0.0001, epsilon=0.01, alg="structperc", rescaling=True,
+                 normalization=True,
+    ):
         self.dv = DictVectorizer()
         self.coef_ = None
         self.coef_avg_ = []
@@ -33,6 +35,7 @@ class answerset_ranker_t:
         self.eta = eta
         self.epsilon = epsilon
         self.rescaling = rescaling
+        self.normalization = normalization
         self.updateAlg = alg
         self.weightInitializer = _myinit
         self.lastInferenceTime = 0
@@ -53,9 +56,19 @@ class answerset_ranker_t:
 
 
     def rescale(self, fname, fvalue):
+        if not self.rescaling:
+            return fvalue
+            
         return 1.0 * \
             (fvalue - self.minmax[(fname, "min")]) / \
             (self.minmax[(fname, "max")] - self.minmax[(fname, "min")])
+
+
+    def normalize(self, v):
+        if not self.normalization:
+            return v
+
+        return v / np.linalg.norm(v.toarray()[0])
 
         
     def getAveragedWeight(self):
@@ -88,7 +101,9 @@ class answerset_ranker_t:
                 fname, fvalue = m.group(1), self.rescale(m.group(1), float(_drink(m.group(2))))
                 vec[fname] += 1.0 * fvalue
 
-        return self.dv.transform(vec)
+        vec = self.dv.transform(vec)
+        
+        return self.normalize(vec)
 
         
     def predict(self, lpfiles, goldAtoms=[], weight=None, lossAugmented=False, enum=False):
@@ -178,7 +193,6 @@ class answerset_ranker_t:
 
         pCurCost, pCurrent = predictions[0]
         vCurrent = self.getFeatureVector(pCurrent)
-        vCurrent /= np.linalg.norm(vCurrent.toarray()[0])
         
         # Is the guess correct?
         if set(goldAtoms).issubset(set(pCurrent)):
@@ -194,7 +208,6 @@ class answerset_ranker_t:
             if set(goldAtoms).issubset(set(a)):
                 pGoalCost, pGoal = c, a
                 vGoal = self.getFeatureVector(pGoal)
-                vGoal /= np.linalg.norm(vGoal.toarray()[0])
                 break
 
         if None == pGoal:
