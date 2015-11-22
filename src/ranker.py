@@ -14,6 +14,10 @@ from autograd import grad
 
 RESOLUTION = 10000
 
+def _myinit(fidx):
+    random.seed(fidx)
+    return 0.001*random.random()
+    
 class answerset_ranker_t:
     CORRECT = 0
     NO_LVC  = 1
@@ -24,11 +28,12 @@ class answerset_ranker_t:
     def __init__(self, eta=0.01, C = 0.0001, epsilon=0.01, alg = "PA-II"):
         self.dv = DictVectorizer()
         self.coef_ = None
+        self.coef_avg_ = []
         self.C = C
         self.eta = eta
         self.epsilon = epsilon
         self.updateAlg = alg
-        self.weightInitializer = lambda fidx: 0
+        self.weightInitializer = _myinit
         self.lastInferenceTime = 0
         self.myhash = hashlib.sha1(str(random.random())).hexdigest()
 
@@ -41,10 +46,23 @@ class answerset_ranker_t:
         for i in xrange(self.coef_.shape[0]):
             self.coef_[i] = self.weightInitializer(i)
 
-            
-    def predict(self, lpfiles, goldAtoms=[], lossAugmented=False, enum=False):
+        self.coef_avg_ += [self.coef_.copy()]
+
+
+    def getAveragedWeight(self):
+        avgWeight = np.array([0.0]*self.coef_.shape[0])
+
+        for w_t in self.coef_avg_:
+            avgWeight += w_t
+
+        return avgWeight/len(self.coef_avg_)
+        
+        
+    def predict(self, lpfiles, goldAtoms=[], weight=None, lossAugmented=False, enum=False):
         regexWeakConstraint = re.compile(":~(.*?)\[f_(.*?)\(([-0-9.e]+)\)@(.*?)\]")
 
+        if weight is None: weight = self.coef_
+        
         # Generate feature-weighted answer set program.
         fnTmp = "/work/naoya-i/tmp/aspinpact_%s.pl" % self.myhash
         tmpf = open(fnTmp, "w")
@@ -62,11 +80,11 @@ class answerset_ranker_t:
                                                         ",".join(binder.split(",")[1:]).strip()
                     fidx = self.dv.vocabulary_[fname]
 
-                    print >>tmpf, "%% %.3f x %f" % (self.coef_[fidx], fvalue)
+                    print >>tmpf, "%% %.3f x %f" % (weight[fidx], fvalue)
                     print >>tmpf, "f_%s(%s, %s) :- %s" % (fname, _sanitize(fvalue), binder, constraint)
                     print >>tmpf, ":~ f_%s(%s, %s). [%d@1, %s]" % (
                         fname, _sanitize(fvalue), binder,
-                        int(-RESOLUTION*self.coef_[fidx]*fvalue), binder)
+                        int(-RESOLUTION*weight[fidx]*fvalue), binder)
 
                 else:
                     print >>tmpf, ln.strip()
@@ -109,6 +127,7 @@ class answerset_ranker_t:
 
 
     def fit(self):
+        self.coef_ = self.getAveragedWeight()
         return False
         
 
@@ -117,7 +136,7 @@ class answerset_ranker_t:
         myloss, diff = 0.0, np.array([0.0] * self.coef_.shape[0])
 
         # First, guess what.
-        predictions = self.predict(aspfiles, goldAtoms, lossAugmented=True)
+        predictions = self.predict(aspfiles)
 
         if 0 == len(predictions):
             return answerset_ranker_t.CANNOT_PREDICT, 0.0, None
@@ -153,19 +172,16 @@ class answerset_ranker_t:
         myloss, diff = 0.0, np.array([0.0]*self.coef_)
        
         if "structperc" == self.updateAlg:
-            def loss(w, c, g):
-                prior  = 0.5*np.dot(w, w)**2
-                likeli = np.dot(w, c) - np.dot(w, g) + math.sqrt(len(set(goldAtoms) - set(pCurrent)))
-                return max(0, prior + likeli)
-            
-            diff   = grad(loss)(self.coef_, vCurrent.toarray()[0], vGoal.toarray()[0])
-            myloss = loss(self.coef_, vCurrent.toarray()[0], vGoal.toarray()[0])
+            diff   = (vGoal - vCurrent).toarray()[0]
+            myloss = len(set(goldAtoms) - set(pCurrent))
 
-            # Update the weights.
+            # Update the weights.            
             for i, v_i in enumerate(diff):
                 self.adagrad[i] += v_i*v_i
-                self.coef_[i] -= self.eta/math.sqrt(1+self.adagrad[i])*v_i
+                self.coef_[i] += v_i # self.eta/math.sqrt(1+self.adagrad[i])*v_i
 
+            self.coef_avg_ += [self.coef_.copy()]
+                
                     
         elif self.updateAlg in ["PA-I", "PA-II"]:
             # See Crammer et al. 2006 for more details.

@@ -47,14 +47,19 @@ def main(options, args):
     except KeyboardInterrupt:
         print >>sys.stderr, "Aborted."
 
-    fsOut = sys.stdout if None == options.output else open(options.output, "w")
+    _output(options.output, xmRoot)
 
-    if None != options.output:
-        print >>sys.stderr, "Writing to %s..." % options.output
+    
+def _output(out, xmRoot):
+    fsOut = sys.stdout
+
+    if None != out:
+        print >>sys.stderr, "Writing to %s..." % out
+        fsOut = open(out, "w")
         
     print >>fsOut, etree.tostring(xmRoot, pretty_print=True)
-
-
+    
+    
 def _learn(xmRoot, options, args, ranker):
     xmRoot.append(_writeParams(ranker))
 
@@ -127,8 +132,6 @@ def _learn(xmRoot, options, args, ranker):
             xmEpoch.append(xmAccuracy)
 
             print >>sys.stderr, "acc. =", xmAccuracy.attrib["accuracy"]
-                    
-    return
 
 
 def _writeLoss(stat, loss):
