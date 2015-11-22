@@ -28,6 +28,7 @@ class answerset_ranker_t:
         self.eta = eta
         self.epsilon = epsilon
         self.updateAlg = alg
+        self.weightInitializer = lambda fidx: 0
         self.lastInferenceTime = 0
         self.myhash = hashlib.sha1(str(random.random())).hexdigest()
 
@@ -36,39 +37,12 @@ class answerset_ranker_t:
         self.dv.fit([features])
         self.coef_ = np.array([0.0]*len(features.keys()))
         self.adagrad = np.array([0.0]*self.coef_.shape[0])
-        self.batch_sumFeatureVector = np.array([0.0]*self.coef_.shape[0])
 
-        self.initGurobi()
-        
-
-    def initGurobi(self):
-        self.grbopt = gp.Model("mipl")
-        self.grbopt.params.OutputFlag = 0
-        
-        self.grbvars = []
-        self.grbvarSlack = self.grbopt.addVar(0.0, gp.GRB.INFINITY, 0.0, gp.GRB.CONTINUOUS, "slack")
-        
         for i in xrange(self.coef_.shape[0]):
-            self.grbvars += [self.grbopt.addVar(-gp.GRB.INFINITY, gp.GRB.INFINITY, 0.0, gp.GRB.CONTINUOUS, "w_%d" % i)]
-            
-        self.grbopt.update()
+            self.coef_[i] = self.weightInitializer(i)
 
-        #
-        # Construct objective function.
-        obj = gp.QuadExpr()
-        for i, w_i in enumerate(self.coef_):
-            obj += 0.5*self.grbvars[i]*self.grbvars[i]
-        obj += self.C*self.grbvarSlack
-
-        self.grbopt.setObjective(obj)
             
-        self.grbconstr = gp.LinExpr()
-        self.grbloss = 0
-        self.numFedExamples = 0
-        self.accumulatedLoss = 0
-        
-            
-    def predict(self, lpfiles, goldAtoms=[], bad=False, lossAugmented=False, enum=False):
+    def predict(self, lpfiles, goldAtoms=[], lossAugmented=False, enum=False):
         regexWeakConstraint = re.compile(":~(.*?)\[f_(.*?)\(([-0-9.e]+)\)@(.*?)\]")
 
         # Generate feature-weighted answer set program.
@@ -88,10 +62,6 @@ class answerset_ranker_t:
                                                         ",".join(binder.split(",")[1:]).strip()
                     fidx = self.dv.vocabulary_[fname]
 
-                    # # Initialization.
-                    if 0.0 == self.coef_[fidx]:
-                        self.coef_[fidx] = 1 # random.random()*0.1 # *2.0
-
                     print >>tmpf, "%% %.3f x %f" % (self.coef_[fidx], fvalue)
                     print >>tmpf, "f_%s(%s, %s) :- %s" % (fname, _sanitize(fvalue), binder, constraint)
                     print >>tmpf, ":~ f_%s(%s, %s). [%d@1, %s]" % (
@@ -106,20 +76,10 @@ class answerset_ranker_t:
             if lossAugmented:
                 for a in goldAtoms:
                     print >>tmpf, ":~ not %s. [-1@1, lossaug_%s]" % (a, re.sub("[\(\),]", "_", a))
-
-                # print >>tmpf, "correct :- %s." % (", ".join([a for a in goldAtoms]))
-                # print >>tmpf, ":- correct."
                     
             else:
                 print >>tmpf, "correct :- %s." % (", ".join([a for a in goldAtoms]))
-
-                if bad:
-                    pass #print >>tmpf, ":~ correct. [9999999999@1]"
-                    #print >>tmpf, ":~ correct. [9999999999@1]"
-
-                else:
-                    #print >>tmpf, ":~ not correct. [9999999999@1]"
-                    print >>tmpf, ":- not correct."
+                print >>tmpf, ":- not correct."
 
         tmpf.close()
 
@@ -149,48 +109,6 @@ class answerset_ranker_t:
 
 
     def fit(self):
-        if not self.updateAlg.startswith("batch"): return
-
-        if "batch" == self.updateAlg:
-            self.grbconstr += self.numFedExamples*self.grbvarSlack
-            self.grbopt.addConstr(self.grbconstr >= self.grbloss, "margin")
-            self.grbopt.update()
-
-            # print >>sys.stderr, self.grbconstr
-            print >>sys.stderr, self.grbopt.getConstrs()
-            
-            self.grbopt.reset()
-            self.grbopt.optimize()
-            
-            bfcoef = self.coef_.copy()
-            
-            for i, v_i in enumerate(self.grbvars):
-                self.coef_[i] = v_i.x
-
-            print >>sys.stderr, "VAL:", self.grbconstr.getValue(), "SLACK:", self.grbvarSlack.x, "COEF:", self.coef_
-            
-            isConverged = np.array_equal(bfcoef, self.coef_)
-
-            ## Needs to be checked after the update.
-            ## (self.accumulatedLoss >= self.grbloss - self.numFedExamples*(self.grbvarSlack.x-self.epsilon))
-            
-            self.grbconstr = gp.LinExpr()
-            self.grbloss   = 0
-            self.numFedExamples = 0
-            self.accumulatedLoss = 0
-            
-            return isConverged
-        
-        for i, v_i in enumerate(self.batch_sumFeatureVector):
-            self.adagrad[i] += v_i*v_i
-            
-            if self.coef_[i] - self.eta/math.sqrt(1+self.adagrad[i])*v_i > 0:
-                self.coef_[i] -= self.eta/math.sqrt(1+self.adagrad[i])*v_i
-            
-        self.batch_sumFeatureVector = np.array([0.0] * self.coef_.shape[0])
-
-        print >>sys.stderr, "COEF:", self.coef_
-
         return False
         
 
@@ -233,36 +151,22 @@ class answerset_ranker_t:
         assert(set(goldAtoms).issubset(set(pGoal)))
 
         myloss, diff = 0.0, np.array([0.0]*self.coef_)
-
-        def loss(w, c, g):
-            prior  = 0.5*np.dot(w, w)**2
-            likeli = np.dot(w, c) - np.dot(w, g) + math.sqrt(len(set(goldAtoms) - set(pCurrent)))
-            return max(0, prior + likeli)
-        
-        if self.updateAlg.startswith("batch"):
-            self.numFedExamples += 1
-
-            myloss = 0
+       
+        if "structperc" == self.updateAlg:
+            def loss(w, c, g):
+                prior  = 0.5*np.dot(w, w)**2
+                likeli = np.dot(w, c) - np.dot(w, g) + math.sqrt(len(set(goldAtoms) - set(pCurrent)))
+                return max(0, prior + likeli)
             
-            for i, v_i in enumerate(self.coef_):
-                self.grbconstr += self.grbvars[i]*(vGoal[0, i] - vCurrent[0, i])
-                myloss += v_i*(vCurrent[0, i] - vGoal[0, i])
-                
-            self.grbloss += len(set(goldAtoms) - set(pCurrent))
-
-            # myloss = math.sqrt(len(set(goldAtoms) - set(pCurrent)))
-
-        elif "structperc" == self.updateAlg:
             diff   = grad(loss)(self.coef_, vCurrent.toarray()[0], vGoal.toarray()[0])
             myloss = loss(self.coef_, vCurrent.toarray()[0], vGoal.toarray()[0])
 
-            # Update the weight vector.
+            # Update the weights.
             for i, v_i in enumerate(diff):
                 self.adagrad[i] += v_i*v_i
+                self.coef_[i] -= self.eta/math.sqrt(1+self.adagrad[i])*v_i
 
-                if self.coef_[i] - self.eta/math.sqrt(1+self.adagrad[i])*v_i > 0:
-                    self.coef_[i] -= self.eta/math.sqrt(1+self.adagrad[i])*v_i
-
+                    
         elif self.updateAlg in ["PA-I", "PA-II"]:
             # See Crammer et al. 2006 for more details.
             w, c, g = self.coef_, vCurrent.toarray()[0], vGoal.toarray()[0]
@@ -278,12 +182,12 @@ class answerset_ranker_t:
             elif "PA-II" == self.updateAlg:
                 tau = myloss / (norm2 + 1.0/(2*self.C))
 
-            # Update the weight.
+            # Update the weights.
             self.coef_ = self.coef_ + tau * (g - c)
 
-            # Make sure that the difference.
-            # print >>sys.stderr, "DIFF", np.dot(self.coef_.toarray()[0], vGoal.toarray()[0]) - np.dot(self.coef_.toarray()[0], vCurrent.toarray()[0])
-            # print >>sys.stderr, "LOSS", math.sqrt(len(set(goldAtoms) - set(pCurrent)))
+
+        else:
+            raise "Unsupported algorithm: %s" % self.updateAlg
 
         return answerset_ranker_t.UPDATED, myloss, diff
 
