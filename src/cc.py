@@ -1,6 +1,7 @@
 
 import sys
 import collections
+import math
 
 sys.path += ["/home/naoya-i/work/clone/wsc/src"]
 import selpref
@@ -130,7 +131,7 @@ def collectEventRels(sent, mention2const):
                 print "%s(%s, %s)." % (dt, mention2const[gov][1], mention2const[de][1])
 
             except KeyError:
-                print >>sys.stderr, "Error!"
+                print >>sys.stderr, "Uncaught error!"
 
 
 def collectFeatures(sent, mention2const, concepts):
@@ -138,7 +139,8 @@ def collectFeatures(sent, mention2const, concepts):
     nc = ncnaive.ncnaive_t(
         "/work/naoya-i/kb/ncnaive0909.0.cdb",
         "/work/naoya-i/kb/tuples.0909.tuples.cdb")
-
+    gn = googlengram.googlengram_t("/work/jun-s/kb/ngrams")
+    
     relations = [
         dt for dt in sent.xpath("./dependencies[@type='collapsed-ccprocessed-dependencies']/dep/@type")
         if dt in "nsubj dobj nsubjpass iobj" or dt.startswith("nmod:")]
@@ -146,21 +148,57 @@ def collectFeatures(sent, mention2const, concepts):
     tried_esa = {}
 
     # Surface features.
-    print >>sys.stderr, mention2const
-    
     for tok in sent.xpath("./tokens/token[./POS/text()='PRP']"):
         for m in mention2const:
             if mention2const[m][0] != "M": continue
 
-            print ":~ pronominalized(%s, tok_%s_%s). [f_surf_%s_%s(1)@1, surf_%s_%s] " % (
+            myatom = "pronominalized(%s, tok_%s_%s)" % (
                 mention2const[m][1],
                 tok.attrib["id"], tok.xpath("./word/text()")[0],
-                mention2const[m][1].split("_")[-1], tok.xpath("./word/text()")[0],
-                mention2const[m][1].split("_")[-1], tok.xpath("./word/text()")[0],
                 )
-    
+            
+            print ":~ %s. [f_surf_%s_%s(1)@1, surf_%s_%s, tok_%s, m_%s] " % (
+                myatom,
+                mention2const[m][1].split("_")[-1], tok.xpath("./word/text()")[0],
+                mention2const[m][1].split("_")[-1], tok.xpath("./word/text()")[0],
+                tok.attrib["id"],
+                m,
+                )
+
+            tokMen = sent.xpath("./tokens/token[@id='%s']" % m)[0]
+            
+            # Look at the predicate of this pronoun.
+            for gov in sent.xpath("./dependencies[@type='collapsed-ccprocessed-dependencies']/dep[@type='nsubj' and ./dependent/@idx='%s']/governor/@idx" % tok.attrib["id"]):
+                tokGov = sent.xpath("./tokens/token[@id='%s']" % gov)[0]
+                freq, freqx, freqy = 0, 0, 0
+                qtype  = ""
+                
+                if "JJ" == tokGov.xpath("./POS/text()")[0]:
+                    jj, nn = tokGov.xpath("./lemma/text()")[0], tokMen.xpath("./lemma/text()")[0]
+                    qtype  = "JJNN"
+
+                elif tokGov.xpath("./POS/text()")[0].startswith("VB"):
+                    jj, nn = tokGov.xpath("./word/text()")[0], tokMen.xpath("./word/text()")[0]
+                    qtype  = "NNVB"
+
+                if "" != qtype:
+                    freqx, freqy, freq = gn.search([jj]), gn.search([nn]), gn.search([jj, nn])
+                    
+                if 0 < freq:
+                    print ":~ %s. [f_google_%s(%f)@1, google_%s, tok_%s, m_%s] %% %s, %s" % (
+                        myatom,
+                        qtype,
+                        math.log(1.0*freq/((1.0*freqx/gn.TOTAL)*freqy)),
+                        qtype,
+                        tok.attrib["id"],
+                        m,
+                        jj, nn,
+                        )
+                    
+                
     for dt in relations:
         for cv, cvw, cvner in concepts:
+            if "be_v" == cv: continue
             if not cv.endswith("_v") and not cv.endswith("_j"): continue
 
             # Selectional preference of slot.
@@ -194,6 +232,8 @@ def collectFeatures(sent, mention2const, concepts):
                 for cv2, cv2w, cv2ner in concepts:
                     if cv == cv2: continue
 
+                    if "be_v" == cv or "be_v" == cv2: continue
+                    if not cv.endswith("_v") and not cv.endswith("_j"): continue
                     if not cv2.endswith("_v") and not cv2.endswith("_j"): continue
 
                     e1, e2 = "%s:%s" % (cv.replace("_", "-"), dt.replace("nmod:", "prep_")), \

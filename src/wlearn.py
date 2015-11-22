@@ -18,8 +18,8 @@ from extractBestAnswerSet import *
 # Usage: weightlearn.py [--preamble] [program files]
 
 def main(options, args):
-    features = {}
-    ranker   = answerset_ranker_t(
+    ranker = answerset_ranker_t(
+        rescaling=not options.no_rescaling,
         C=options.C,
         eta=options.eta,
         epsilon=options.epsilon,
@@ -29,14 +29,14 @@ def main(options, args):
     print >>sys.stderr, "Collecting feature information..."
 
     if None != options.preamble:
-        _collectFeatures(features, options.preamble)
+        ranker.collectFeatures(options.preamble)
 
     for qid, fn in enumerate(args):
-        _collectFeatures(features, fn)
+        ranker.collectFeatures(fn)
 
-    print >>sys.stderr, "Features: %d features were detected." % len(features.keys())
+    print >>sys.stderr, "Features: %d features were detected." % len(ranker.features.keys())
 
-    ranker.set_features(features)
+    ranker.setupFeatures()
 
     # Start learning.
     xmRoot = etree.Element("root")
@@ -163,14 +163,7 @@ def _writeParams(ranker):
                          eta=str(ranker.eta),
                          algo=ranker.updateAlg)
 
-def _collectFeatures(outdict, fn):
-    for ln in open(fn):
-        m = re.search("\[f_(.*?)\([-0-9e.]+\)@", ln)
-
-        if None != m:
-            outdict[m.group(1)] = 0
-
-
+    
 def _readGoldAtoms(fn):
     return [x.strip() for x in open(fn)]
 
@@ -186,6 +179,7 @@ if "__main__" == __name__:
     cmdparser.add_option("--iter", type=int, default=5, help="The number of iterations.")
     cmdparser.add_option("--C", type=float, default=0.01)
     cmdparser.add_option("--eta", type=float, default=0.1)
+    cmdparser.add_option("--no-rescaling", action="store_true")
     cmdparser.add_option("--epsilon", type=float, default=0.001, help="The number of iterations.")
     cmdparser.add_option("--debug", action="store_true")
 

@@ -25,22 +25,25 @@ class answerset_ranker_t:
     INDISTINGUISHABLE = 3
     CANNOT_PREDICT = 4
 
-    def __init__(self, eta=0.01, C = 0.0001, epsilon=0.01, alg = "PA-II"):
+    def __init__(self, eta=0.01, C = 0.0001, epsilon=0.01, alg="structperc", rescaling=True):
         self.dv = DictVectorizer()
         self.coef_ = None
         self.coef_avg_ = []
         self.C = C
         self.eta = eta
         self.epsilon = epsilon
+        self.rescaling = rescaling
         self.updateAlg = alg
         self.weightInitializer = _myinit
         self.lastInferenceTime = 0
         self.myhash = hashlib.sha1(str(random.random())).hexdigest()
-
+        self.features = {}
+        self.minmax = {}
         
-    def set_features(self, features):
-        self.dv.fit([features])
-        self.coef_ = np.array([0.0]*len(features.keys()))
+        
+    def setupFeatures(self):
+        self.dv.fit([self.features])
+        self.coef_ = np.array([0.0]*len(self.features.keys()))
         self.adagrad = np.array([0.0]*self.coef_.shape[0])
 
         for i in xrange(self.coef_.shape[0]):
@@ -49,6 +52,12 @@ class answerset_ranker_t:
         self.coef_avg_ += [self.coef_.copy()]
 
 
+    def rescale(self, fname, fvalue):
+        return 1.0 * \
+            (fvalue - self.minmax[(fname, "min")]) / \
+            (self.minmax[(fname, "max")] - self.minmax[(fname, "min")])
+
+        
     def getAveragedWeight(self):
         avgWeight = np.array([0.0]*self.coef_.shape[0])
 
@@ -57,6 +66,30 @@ class answerset_ranker_t:
 
         return avgWeight/len(self.coef_avg_)
         
+
+    def collectFeatures(self, fn):
+        for ln in open(fn):
+            m = re.search("\[f_(.*?)\(([-0-9e.]+)\)@", ln)
+
+            if None != m:
+                self.features[m.group(1)] = 0
+                self.minmax[(m.group(1), "max")] = max(self.minmax.get((m.group(1), "max"), 0), float(m.group(2)))
+                self.minmax[(m.group(1), "min")] = min(self.minmax.get((m.group(1), "min"), 0), float(m.group(2)))
+
+                
+    def getFeatureVector(self, answerset):
+        vec = collections.defaultdict(float)
+        regexWeakConstraint = re.compile("f_(.*?)\((.*?),")
+
+        for a in answerset:
+            m = regexWeakConstraint.search(a)
+
+            if None != m:
+                fname, fvalue = m.group(1), self.rescale(m.group(1), float(_drink(m.group(2))))
+                vec[fname] += 1.0 * fvalue
+
+        return self.dv.transform(vec)
+
         
     def predict(self, lpfiles, goldAtoms=[], weight=None, lossAugmented=False, enum=False):
         regexWeakConstraint = re.compile(":~(.*?)\[f_(.*?)\(([-0-9.e]+)\)@(.*?)\]")
@@ -79,6 +112,7 @@ class answerset_ranker_t:
                                                         float(fvalue.strip()), \
                                                         ",".join(binder.split(",")[1:]).strip()
                     fidx = self.dv.vocabulary_[fname]
+                    fvalue = self.rescale(fname, fvalue)
 
                     print >>tmpf, "%% %.3f x %f" % (weight[fidx], fvalue)
                     print >>tmpf, "f_%s(%s, %s) :- %s" % (fname, _sanitize(fvalue), binder, constraint)
@@ -127,6 +161,7 @@ class answerset_ranker_t:
 
 
     def fit(self):
+        self.coef_avg_ += [self.coef_.copy()]
         self.coef_ = self.getAveragedWeight()
         return False
         
@@ -142,7 +177,7 @@ class answerset_ranker_t:
             return answerset_ranker_t.CANNOT_PREDICT, 0.0, None
 
         pCurCost, pCurrent = predictions[0]
-        vCurrent = _getFeatureVector(pCurrent, self.dv)
+        vCurrent = self.getFeatureVector(pCurrent)
         vCurrent /= np.linalg.norm(vCurrent.toarray()[0])
         
         # Is the guess correct?
@@ -158,7 +193,7 @@ class answerset_ranker_t:
         for c, a in goals:
             if set(goldAtoms).issubset(set(a)):
                 pGoalCost, pGoal = c, a
-                vGoal = _getFeatureVector(pGoal, self.dv)
+                vGoal = self.getFeatureVector(pGoal)
                 vGoal /= np.linalg.norm(vGoal.toarray()[0])
                 break
 
@@ -180,7 +215,7 @@ class answerset_ranker_t:
                 self.adagrad[i] += v_i*v_i
                 self.coef_[i] += v_i # self.eta/math.sqrt(1+self.adagrad[i])*v_i
 
-            self.coef_avg_ += [self.coef_.copy()]
+            # self.coef_avg_ += [self.coef_.copy()]
                 
                     
         elif self.updateAlg in ["PA-I", "PA-II"]:
@@ -209,20 +244,6 @@ class answerset_ranker_t:
 
 #
 # Helper functions.
-def _getFeatureVector(answerset, dv):
-    vec = collections.defaultdict(float)
-    regexWeakConstraint = re.compile("f_(.*?)\((.*?),")
-
-    for a in answerset:
-        m = regexWeakConstraint.search(a)
-
-        if None != m:
-            fname, fvalue = m.group(1), float(_drink(m.group(2)))
-            vec[fname] += 1.0 * fvalue
-
-    return dv.transform(vec)
-
-
 def _sanitize(f):
     return "v_%s" % (str(f).replace(".", "D").replace("-", "M"))
 
