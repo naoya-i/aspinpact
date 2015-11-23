@@ -3,14 +3,15 @@ import sys
 import collections
 import math
 
+from lxml import etree
+from nltk.corpus import wordnet as wn
+
+import nltk
+
 sys.path += ["/home/naoya-i/work/clone/wsc/src"]
 import selpref
 import ncnaive
 import googlengram
-import nltk
-
-from lxml import etree
-from nltk.corpus import wordnet as wn
 
 
 def _getNumber(l):
@@ -26,7 +27,6 @@ def _getGender(l):
 def _getWNpos(p):
     if p == "j": return "a"
     return p
-
 
 def _sanitize(l):
     return l.replace(".", "_").replace("-", "_")
@@ -59,6 +59,15 @@ def collectOntological(sent):
             except nltk.corpus.reader.wordnet.WordNetError:
                 continue
 
+            for lms in s.lemmas():
+                if lms.name().lower() == lemma.lower(): continue
+                
+                print "%s_%s(X) :- %s_%s(X), use_synonym." % (
+                    _sanitize(lms.name().lower()), pos[0].lower(),
+                    _sanitize(lemma.lower()), pos[0].lower(), )
+
+                concepts += [("%s_%s" % (lms.name().lower(), pos[0].lower()), lms.name(), ner)]
+                
             for sh in s.hypernyms():
                 for lmh in sh.lemma_names():
                     print "%s_%s(X) :- %s_%s(X), use_hypernym." % (_sanitize(lmh.lower()), pos[0].lower(), _sanitize(lemma.lower()), pos[0].lower(), )
@@ -170,19 +179,19 @@ def collectFeatures(sent, mention2const, concepts):
             # Look at the predicate of this pronoun.
             for gov in sent.xpath("./dependencies[@type='collapsed-ccprocessed-dependencies']/dep[@type='nsubj' and ./dependent/@idx='%s']/governor/@idx" % tok.attrib["id"]):
                 tokGov = sent.xpath("./tokens/token[@id='%s']" % gov)[0]
-                freq, freqx, freqy = 0, 0, 0
+                freqx, freqy, freq = 0, 0, 0
                 qtype  = ""
                 
                 if "JJ" == tokGov.xpath("./POS/text()")[0]:
-                    jj, nn = tokGov.xpath("./lemma/text()")[0], tokMen.xpath("./lemma/text()")[0]
+                    q1, q2 = tokGov.xpath("./lemma/text()")[0], tokMen.xpath("./lemma/text()")[0]
                     qtype  = "JJNN"
 
                 elif tokGov.xpath("./POS/text()")[0].startswith("VB"):
-                    jj, nn = tokGov.xpath("./word/text()")[0], tokMen.xpath("./word/text()")[0]
+                    q1, q2 = tokMen.xpath("./word/text()")[0], tokGov.xpath("./word/text()")[0]
                     qtype  = "NNVB"
 
                 if "" != qtype:
-                    freqx, freqy, freq = gn.search([jj]), gn.search([nn]), gn.search([jj, nn])
+                    freqx, freqy, freq = gn.search([q1]), gn.search([q2]), gn.search([q1, q2])
                     
                 if 0 < freq:
                     print ":~ %s. [f_google_%s(%f)@1, google_%s, tok_%s, m_%s] %% %s, %s" % (
@@ -192,7 +201,7 @@ def collectFeatures(sent, mention2const, concepts):
                         qtype,
                         tok.attrib["id"],
                         m,
-                        jj, nn,
+                        q1, q2,
                         )
                     
                 
@@ -267,24 +276,24 @@ def main():
         print "%"
         print "% Logical forms of sentence."
 
-        mention2const = collectMentions(sent)
+        m2c = collectMentions(sent)
 
         print
 
-        collectEventRels(sent, mention2const)
+        collectEventRels(sent, m2c)
 
         print
         print "%"
         print "% Relevant knowledge base."
         print
-        print "% Ontological."
+        print "% Ontological knowledge."
 
         concepts = collectOntological(sent)
 
         print
-        print "% World axioms."
+        print "% World rules."
 
-        collectFeatures(sent, mention2const, concepts)
+        collectFeatures(sent, m2c, concepts)
 
 
 if "__main__" == __name__:

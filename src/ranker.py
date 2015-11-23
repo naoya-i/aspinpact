@@ -11,13 +11,22 @@ from sklearn.feature_extraction import DictVectorizer
 from extractBestAnswerSet import *
 from scipy.sparse import dok_matrix, csr_matrix
 from autograd import grad
+from lxml import etree
 
 RESOLUTION = 10000
 
-def _myinit(fidx):
-    random.seed(fidx)
-    return 0.001*random.random()
+#
+# External helper functions.
+def readGoldAtoms(fn):
+    return [x.strip() for x in open(fn)]
+
     
+class answer_set_t:
+    def __init__(self, score, answerset):
+        self.score = score
+        self.answerset = answerset
+
+        
 class answerset_ranker_t:
     CORRECT = 0
     NO_LVC  = 1
@@ -25,7 +34,7 @@ class answerset_ranker_t:
     INDISTINGUISHABLE = 3
     CANNOT_PREDICT = 4
 
-    def __init__(self, eta=0.01, C = 0.0001, epsilon=0.01, alg="structperc", rescaling=True,
+    def __init__(self, eta=0.01, C = 0.0001, epsilon=0.01, alg="latperc", rescaling=True,
                  normalization=True,
     ):
         self.dv = DictVectorizer()
@@ -43,6 +52,32 @@ class answerset_ranker_t:
         self.features = {}
         self.minmax = {}
         
+
+    def load(self, xml, epoch = -1):
+        x = etree.parse(xml)
+
+        w = x.xpath("/root/ranker/weight/text()")[0] if -1 == epoch else x.xpath("/root/epoch/weight/text()")[epoch]
+        m = x.xpath("/root/ranker/minmax/text()")[0]
+        
+        self.features = eval(w)
+        self.minmax   = eval(m)
+        self.setupFeatures()
+        self.coef_    = self.dv.transform(self.features).toarray()[0]
+        
+
+    def serialize(self):
+        xmRanker = etree.Element("ranker")
+
+        xmMinmax = etree.Element("minmax")
+        xmRanker.append(xmMinmax)
+        xmMinmax.text = repr(self.minmax)
+
+        xmWeight = etree.Element("weight")
+        xmRanker.append(xmWeight)
+        xmWeight.text = repr(self.dv.inverse_transform(self.coef_)[0])
+        
+        return xmRanker
+        
         
     def setupFeatures(self):
         self.dv.fit([self.features])
@@ -54,6 +89,16 @@ class answerset_ranker_t:
         self.coef_avg_ += [self.coef_.copy()]
 
 
+    def collectFeatures(self, fn):
+        for ln in open(fn):
+            m = re.search("\[f_(.*?)\(([-0-9e.]+)\)@", ln)
+
+            if None != m:
+                self.features[m.group(1)] = 0
+                self.minmax[(m.group(1), "max")] = max(self.minmax.get((m.group(1), "max"), 0), float(m.group(2)))
+                self.minmax[(m.group(1), "min")] = min(self.minmax.get((m.group(1), "min"), 0), float(m.group(2)))
+
+                
     def rescale(self, fname, fvalue):
         if not self.rescaling:
             return fvalue
@@ -78,16 +123,6 @@ class answerset_ranker_t:
 
         return avgWeight/len(self.coef_avg_)
         
-
-    def collectFeatures(self, fn):
-        for ln in open(fn):
-            m = re.search("\[f_(.*?)\(([-0-9e.]+)\)@", ln)
-
-            if None != m:
-                self.features[m.group(1)] = 0
-                self.minmax[(m.group(1), "max")] = max(self.minmax.get((m.group(1), "max"), 0), float(m.group(2)))
-                self.minmax[(m.group(1), "min")] = min(self.minmax.get((m.group(1), "min"), 0), float(m.group(2)))
-
                 
     def getFeatureVector(self, answerset):
         vec = collections.defaultdict(float)
@@ -105,7 +140,7 @@ class answerset_ranker_t:
         return self.normalize(vec)
 
         
-    def predict(self, lpfiles, goldAtoms=[], weight=None, lossAugmented=False, enum=False):
+    def predict(self, lpfiles, goldAtoms=[], weight=None, lossAugmented=False, exclude=False, enum=False, eco=False):
         regexWeakConstraint = re.compile(":~(.*?)\[f_(.*?)\(([-0-9.e]+)\)@(.*?)\]")
 
         if weight is None: weight = self.coef_
@@ -125,15 +160,28 @@ class answerset_ranker_t:
                                                         fname.strip(), \
                                                         float(fvalue.strip()), \
                                                         ",".join(binder.split(",")[1:]).strip()
-                    fidx = self.dv.vocabulary_[fname]
-                    fvalue = self.rescale(fname, fvalue)
 
-                    print >>tmpf, "%% %.3f x %f" % (weight[fidx], fvalue)
-                    print >>tmpf, "f_%s(%s, %s) :- %s" % (fname, _sanitize(fvalue), binder, constraint)
-                    print >>tmpf, ":~ f_%s(%s, %s). [%d@1, %s]" % (
-                        fname, _sanitize(fvalue), binder,
-                        int(-RESOLUTION*weight[fidx]*fvalue), binder)
+                    if not self.dv.vocabulary_.has_key(fname):
+                        print >>tmpf, "%% LOST: %s" % (ln.strip())
 
+                    else:
+                        fidx = self.dv.vocabulary_[fname]
+                        fvalue = self.rescale(fname, fvalue)
+
+                        print >>tmpf, "%% %.3f x %f" % (weight[fidx], fvalue)
+
+                        if not eco:
+                            print >>tmpf, "f_%s(%s, %s) :- %s" % (fname, _sanitize(fvalue), binder, constraint)
+                            print >>tmpf, ":~ f_%s(%s, %s). [%d@1, %s]" % (
+                                fname, _sanitize(fvalue), binder,
+                                int(-RESOLUTION*weight[fidx]*fvalue), binder)
+
+                        else:
+                            # If we do not have to recover the feature vector, then.
+                            print >>tmpf, ":~ %s [%d@1, %s]" % (
+                                constraint,
+                                int(-RESOLUTION*weight[fidx]*fvalue), binder)
+                        
                 else:
                     print >>tmpf, ln.strip()
 
@@ -145,7 +193,9 @@ class answerset_ranker_t:
                     
             else:
                 print >>tmpf, "correct :- %s." % (", ".join([a for a in goldAtoms]))
-                print >>tmpf, ":- not correct."
+
+                if exclude: print >>tmpf, ":- correct."
+                else:       print >>tmpf, ":- not correct."
 
         tmpf.close()
 
@@ -169,9 +219,9 @@ class answerset_ranker_t:
         os.system("rm %s" % fnTmp)
 
         if enum:
-            return [(-1.0*c/RESOLUTION, a) for c, a in extractAnswerSets(clingoret)]
+            return [answer_set_t(-1.0*c/RESOLUTION, a) for c, a in extractAnswerSets(clingoret)]
         
-        return [(-1.0*c/RESOLUTION, a) for c, a in extractBestAnswerSets(clingoret)]
+        return [answer_set_t(-1.0*c/RESOLUTION, a) for c, a in extractBestAnswerSets(clingoret)]
 
 
     def fit(self):
@@ -188,41 +238,36 @@ class answerset_ranker_t:
         if 0 == len(predictions):
             return answerset_ranker_t.CANNOT_PREDICT, 0.0
 
-        pCurCost, pCurrent = predictions[0]
+        pcur = predictions[0]
         
         # Is the guess correct?
-        if set(goldAtoms).issubset(set(pCurrent)):
+        if set(goldAtoms).issubset(set(pcur.answerset)):
             return answerset_ranker_t.CORRECT, 0.0
 
         # Guess correct label.
         goals = self.predict(aspfiles, goldAtoms)
 
         # Find answer set containing gold atoms.
-        pGoal = None
-
-        for c, a in goals:
-            if set(goldAtoms).issubset(set(a)):
-                pGoalCost, pGoal = c, a
-                break
-
-        if None == pGoal:
+        if 0 == len(goals):
             return answerset_ranker_t.NO_LVC, 0.0
 
-        # If it is not inferred, then give up.
-        assert(not set(goldAtoms).issubset(set(pCurrent)))
-        assert(set(goldAtoms).issubset(set(pGoal)))
+        pgoal = goals[0]
 
-        return self._updateWeights(pCurrent, pGoal, goldAtoms)
+        # If it is not inferred, then give up.
+        assert(not set(goldAtoms).issubset(set(pcur.answerset)))
+        assert(set(goldAtoms).issubset(set(pgoal.answerset)))
+
+        return self._updateWeights(pcur.answerset, pgoal.answerset, goldAtoms)
 
         
-    def _updateWeights(self, pCurrent, pGoal, pCurrent):
+    def _updateWeights(self, pCurrent, pGoal, goldAtoms):
         vCurrent, vGoal = self.getFeatureVector(pCurrent), self.getFeatureVector(pGoal)
         
         if "latperc" == self.updateAlg:
-            self.coef_[i] += (vGoal - vCurrent).toarray()[0]
+            self.coef_ += (vGoal - vCurrent).toarray()[0]
 
             return answerset_ranker_t.UPDATED, len(set(goldAtoms) - set(pCurrent))
-                    
+            
         elif self.updateAlg in ["PA-I", "PA-II"]:
             w, c, g = self.coef_, vCurrent.toarray()[0], vGoal.toarray()[0]
             diff    = g - c
@@ -247,6 +292,11 @@ class answerset_ranker_t:
 def _sanitize(f):
     return "v_%s" % (str(f).replace(".", "D").replace("-", "M"))
 
-
 def _drink(f):
     return f.replace("D", ".").replace("M", "-")[2:]
+
+def _myinit(fidx):
+    random.seed(fidx)
+    return 0.001*random.random()
+
+    

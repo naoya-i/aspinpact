@@ -15,10 +15,8 @@ from lxml import etree
 from ranker import *
 from extractBestAnswerSet import *
 
-# Usage: weightlearn.py [--preamble] [program files]
-
 def main(options, args):
-    ranker = answerset_ranker_t(
+    myranker = answerset_ranker_t(
         rescaling=not options.no_rescaling,
         normalization=not options.no_normalization,
         C=options.C,
@@ -30,24 +28,27 @@ def main(options, args):
     print >>sys.stderr, "Collecting feature information..."
 
     if None != options.preamble:
-        ranker.collectFeatures(options.preamble)
+        myranker.collectFeatures(options.preamble)
 
     for qid, fn in enumerate(args):
-        ranker.collectFeatures(fn)
+        myranker.collectFeatures(fn)
 
-    print >>sys.stderr, "Features: %d features were detected." % len(ranker.features.keys())
+    print >>sys.stderr, "Features: %d features were detected." % len(myranker.features.keys())
+    print >>sys.stderr, "Training examples: %d files." % len(args)
 
-    ranker.setupFeatures()
+    myranker.setupFeatures()
 
     # Start learning.
     xmRoot = etree.Element("root")
     
     try:
-        _learn(xmRoot, options, args, ranker)
+        print >>sys.stderr, "Start learning process..."
+        _learn(xmRoot, options, args, myranker)
 
     except KeyboardInterrupt:
         print >>sys.stderr, "Aborted."
 
+    xmRoot.append(myranker.serialize())
     _output(options.output, xmRoot)
 
     
@@ -61,8 +62,8 @@ def _output(out, xmRoot):
     print >>fsOut, etree.tostring(xmRoot, pretty_print=True)
     
     
-def _learn(xmRoot, options, args, ranker):
-    xmRoot.append(_writeParams(ranker))
+def _learn(xmRoot, options, args, myranker):
+    xmRoot.append(_writeParams(options))
 
     isConverged = False
 
@@ -72,38 +73,51 @@ def _learn(xmRoot, options, args, ranker):
             xmEpoch = etree.Element("epoch", id="%d" % (1+i/2))
             xmRoot.append(xmEpoch)
 
+        ranked      = 0
         acc         = 0
         stat        = [0]*5
         loss, times = [], []
         isUpdating  = i%2 == 1
 
+        if not isUpdating and not options.report_perf:
+            continue
+        
         for j, fn in enumerate(args):
             if j%50 == 0: print >>sys.stderr, ".",
 
             aspfiles  = [fn] if options.preamble != None else [fn, options.preamble]
-            goldAtoms = _readGoldAtoms(fn.replace(".pl", ".gold.interp"))
+            goldAtoms = readGoldAtoms(fn.replace(".pl", ".gold.interp"))
 
             if isUpdating:
                 
                 # Feed the example to the learner.
-                ret, myloss = ranker.feed(aspfiles, goldAtoms)
+                ret, myloss = myranker.feed(aspfiles, goldAtoms)
 
                 if options.debug:
-                    xmProblemwise = etree.Element("problemwise", loss="%.2f" % myloss)
+                    xmProblemwise = etree.Element("problemwise",
+                                                  statusCode="%d" % ret,
+                                                  loss="%.2f" % myloss,
+                                                  filename=fn,
+                    )
                     xmEpoch.append(xmProblemwise)
 
                 stat[ret] += 1
                 loss += [myloss]
 
             else:
-                # Just predict!
-                times   += [ranker.lastInferenceTime]
+                # Just predict!                
+                correctPredictions = myranker.predict(aspfiles, goldAtoms, exclude=False)
+                wrongPredictions = myranker.predict(aspfiles, goldAtoms, exclude=True)
 
-                for pCurCost, pCurrent in ranker.predict(aspfiles):
-                    if set(goldAtoms).issubset(set(pCurrent)):
+                times += [myranker.lastInferenceTime]
+                
+                if 0 < len(correctPredictions):
+                    ranked += 1
+                    
+                    if 0 == len(wrongPredictions) or \
+                       correctPredictions[-1].score > wrongPredictions[-1].score:
                         acc += 1
-                        break
-
+                        
         #
         # Write the current status.
         if isUpdating:
@@ -115,10 +129,10 @@ def _learn(xmRoot, options, args, ranker):
             print >>sys.stderr, "loss =", xmLoss.attrib["loss"]
             print >>sys.stderr, "Learning...",
             
-            isConverged = ranker.fit()
+            isConverged = myranker.fit()
             
             # Write the current vector.
-            xmEpoch.append(_writeWeightVector(ranker.dv.inverse_transform(ranker.coef_)[0]))
+            xmEpoch.append(_writeWeightVector(myranker.dv.inverse_transform(myranker.coef_)[0]))
 
             if isConverged:
                 print >>sys.stderr, "Converged."
@@ -129,10 +143,12 @@ def _learn(xmRoot, options, args, ranker):
         else:
 
             # Write the current accuracy.
-            xmAccuracy = _writePerformance(acc, len(args), times)
+            xmAccuracy = _writePerformance(acc, ranked, len(args), times)
             xmEpoch.append(xmAccuracy)
 
-            print >>sys.stderr, "acc. =", xmAccuracy.attrib["accuracy"]
+            print >>sys.stderr, \
+                "acc.  =", xmAccuracy.attrib["accuracy"], \
+                "prec. =", xmAccuracy.attrib["prec"]
 
 
 def _writeLoss(stat, loss):
@@ -145,43 +161,56 @@ def _writeLoss(stat, loss):
                            loss="%.2f" % (sum(loss))
     )
 
-def _writePerformance(acc, len_args, times):
+def _writePerformance(acc, ranked, len_args, times):
     return etree.Element("performance",
-                         accuracy="%.2f" % (100.0*acc/len_args),
+                         accuracy="%.1f" % (100.0*acc/len_args),
+                         prec="%.1f" % (100.0*acc/ranked),
                          correct="%d" % acc,
                          total="%d" % len_args,
+                         ranked="%d" % ranked,
                          time="%.2f" % (sum(times) / len(times)),
                      )
 
 def _writeWeightVector(v):
     e = etree.Element("weight")
-    e.text = str(v)
+    e.text = repr(v)
     return e
 
-def _writeParams(ranker):
-    return etree.Element("params",
-                         C=str(ranker.C),
-                         eta=str(ranker.eta),
-                         algo=ranker.updateAlg)
-
+def _writeParams(options):
+    xmParams     = etree.Element("params")
+    dictoptions = sorted(vars(options).iteritems(), key=lambda x: x[0])
     
-def _readGoldAtoms(fn):
-    return [x.strip() for x in open(fn)]
+    for k, v in dictoptions:
+        xmParams.attrib[k] = str(v)
 
+    def _tostr(k, v):
+        if isinstance(v, bool):
+            if v:
+                return "--%s" % k
+            else:
+                return ""
 
-def _readWeight(fn):
-    return eval(open(fn).read())
-
+        if isinstance(v, int) or isinstance(v, float) or \
+           (isinstance(v, str) and " " not in v):
+            return "--%s %s" % (k, v)
+                
+        return "--%s '%s'" % (k, v)
+        
+    xmParams.text = " ".join([_tostr(k, v) for k, v in dictoptions])
+    
+    return xmParams
+    
 if "__main__" == __name__:
     cmdparser = optparse.OptionParser(description="Weight Learner for ASP.")
     cmdparser.add_option("--preamble", help="")
     cmdparser.add_option("--output", help="")
-    cmdparser.add_option("--algo", default="batch", help="")
+    cmdparser.add_option("--algo", default="latperc", help="")
     cmdparser.add_option("--iter", type=int, default=5, help="The number of iterations.")
     cmdparser.add_option("--C", type=float, default=0.01)
     cmdparser.add_option("--eta", type=float, default=0.1)
     cmdparser.add_option("--no-rescaling", action="store_true")
     cmdparser.add_option("--no-normalization", action="store_true")
+    cmdparser.add_option("--report-perf", action="store_true")
     cmdparser.add_option("--epsilon", type=float, default=0.001, help="The number of iterations.")
     cmdparser.add_option("--debug", action="store_true")
 
