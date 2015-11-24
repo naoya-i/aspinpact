@@ -97,6 +97,7 @@ def _learn(xmRoot, options, args, myranker):
                     xmProblemwise = etree.Element("problemwise",
                                                   statusCode="%d" % ret,
                                                   loss="%.2f" % myloss,
+                                                  time="%.2f" % myranker.lastInferenceTime,
                                                   filename=fn,
                     )
                     xmEpoch.append(xmProblemwise)

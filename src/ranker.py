@@ -6,7 +6,7 @@ import subprocess
 import collections
 import os
 import gurobipy as gp
-import StringIO
+import cStringIO
 
 from sklearn.feature_extraction import DictVectorizer
 from extractBestAnswerSet import *
@@ -52,6 +52,8 @@ class answerset_ranker_t:
         self.myhash = hashlib.sha1(str(random.random())).hexdigest()
         self.features = {}
         self.minmax = {}
+        self.trainingExamples = []
+        self.trainingLabels = []
 
 
     def load(self, xml, epoch = -1):
@@ -142,48 +144,48 @@ class answerset_ranker_t:
 
 
     def predict(self, lpfiles, goldAtoms=[], weight=None, lossAugmented=False, exclude=False, enum=False, eco=False):
-        regexWeakConstraint = re.compile(":~(.*?)\[f_(.*?)\(([-0-9.e]+)\)@(.*?)\]")
+        regexWeakConstraint = re.compile("^:~(.*?)\[f_(.*?)\(([-0-9.e]+)\)@(.*?)\]")
 
         if weight is None: weight = self.coef_
 
         # Generate feature-weighted answer set program.
-        tmpf = StringIO.StringIO()
+        tmpf = cStringIO.StringIO()
 
         for fn in lpfiles:
             for ln in open(fn):
                 m = regexWeakConstraint.search(ln)
 
+                if None == m:
+                    print >>tmpf, ln.strip()
+                    continue
+
                 # To record feature vector.
-                if None != m:
-                    constraint, fname, fvalue, binder = m.groups()
-                    constraint, fname, fvalue, binder = constraint.strip(), \
-                                                        fname.strip(), \
-                                                        float(fvalue.strip()), \
-                                                        ",".join(binder.split(",")[1:]).strip()
+                constraint, fname, fvalue, binder = m.group(1).strip(), \
+                                                    m.group(2).strip(), \
+                                                    float(m.group(3).strip()), \
+                                                    ",".join(m.group(4).split(",")[1:]).strip()
 
-                    if not self.dv.vocabulary_.has_key(fname):
-                        print >>tmpf, "%% LOST: %s" % (ln.strip())
-
-                    else:
-                        fidx = self.dv.vocabulary_[fname]
-                        fvalue = self.rescale(fname, fvalue)
-
-                        print >>tmpf, "%% %.3f x %f" % (weight[fidx], fvalue)
-
-                        if not eco:
-                            print >>tmpf, "f_%s(%s, %s) :- %s" % (fname, _sanitize(fvalue), binder, constraint)
-                            print >>tmpf, ":~ f_%s(%s, %s). [%d@1, %s]" % (
-                                fname, _sanitize(fvalue), binder,
-                                int(-RESOLUTION*weight[fidx]*fvalue), binder)
-
-                        else:
-                            # If we do not have to recover the feature vector, then.
-                            print >>tmpf, ":~ %s [%d@1, %s]" % (
-                                constraint,
-                                int(-RESOLUTION*weight[fidx]*fvalue), binder)
+                if not self.dv.vocabulary_.has_key(fname):
+                    print >>tmpf, "%% LOST: %s" % (ln.strip())
 
                 else:
-                    print >>tmpf, ln.strip()
+                    fidx = self.dv.vocabulary_[fname]
+                    fvalue = self.rescale(fname, fvalue)
+
+                    print >>tmpf, "%% %.3f x %f" % (weight[fidx], fvalue)
+
+                    if not eco:
+                        print >>tmpf, "f_%s(%s, %s) :- %s" % (fname, _sanitize(fvalue), binder, constraint)
+                        print >>tmpf, ":~ f_%s(%s, %s). [%d@1, %s]" % (
+                            fname, _sanitize(fvalue), binder,
+                            int(-RESOLUTION*weight[fidx]*fvalue), binder)
+
+                    else:
+                        # If we do not have to recover the feature vector, then.
+                        print >>tmpf, ":~ %s [%d@1, %s]" % (
+                            constraint,
+                            int(-RESOLUTION*weight[fidx]*fvalue), binder)
+
 
         # Constrain the answer set space to one including gold atoms.
         if len(goldAtoms) > 0:
@@ -206,9 +208,7 @@ class answerset_ranker_t:
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
         )
-
-        print >>pClingo.stdin, tmpf.getvalue()
-
+        pClingo.stdin.write(tmpf.getvalue())
         pClingo.stdin.close()
 
         clingoret = pClingo.stdout.read()
@@ -233,6 +233,18 @@ class answerset_ranker_t:
 
     def feed(self, aspfiles, goldAtoms):
 
+        if "svm" == self.updateAlg:
+            posi = self.predict(aspfiles, goldAtoms, exclude=False)
+            nega = self.predict(aspfiles, goldAtoms, exclude=True)
+
+            if len(posi) == 0 or len(nega) == 0:
+                return answerset_ranker_t.NO_LVC, 0.0
+
+            self.trainingExamples += [self.getFeatureVector(posi[0].answerset), self.getFeatureVector(nega[0].answerset)]
+            self.trainingLabels   += [1, -1]
+            
+            return answerset_ranker_t.UPDATED, 0.0
+        
         # First, guess what.
         predictions = self.predict(aspfiles)
 

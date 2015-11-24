@@ -39,6 +39,8 @@ def main(options, args):
 
     _output(options.output, xmRoot)
 
+    return xmRoot
+    
 
 def _output(out, xmRoot):
     fsOut = sys.stdout
@@ -56,7 +58,7 @@ def _interpret(xmRoot, options, args, myranker):
     times  = []
 
     for j, fn in enumerate(args):
-        print >>sys.stderr, "\r", "[%4d/%4d] Processing %s..." % (1+j, len(args), fn)
+        print >>sys.stderr, "\r", "[%4d/%4d] Processing %s..." % (1+j, len(args), fn),
 
         aspfiles  = [fn] if options.preamble != None else [fn, options.preamble]
         goldAtoms = readGoldAtoms(fn.replace(".pl", ".gold.interp"))
