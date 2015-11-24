@@ -25,12 +25,12 @@ def main(options, args):
     myranker.load(options.model, options.use_epoch)
 
     print >>sys.stderr, "%d weights are loaded." % len(myranker.features.keys())
-    
+
     # Intepret the input.
     xmRoot = etree.Element("root")
     xmBasic = etree.Element("settings", model=options.model)
     xmRoot.append(xmBasic)
-    
+
     try:
         _interpret(xmRoot, options, args, myranker)
 
@@ -39,24 +39,24 @@ def main(options, args):
 
     _output(options.output, xmRoot)
 
-    
+
 def _output(out, xmRoot):
     fsOut = sys.stdout
 
     if None != out:
         print >>sys.stderr, "Writing to %s..." % out
         fsOut = open(out, "w")
-        
+
     print >>fsOut, etree.tostring(xmRoot, pretty_print=True)
-    
-    
+
+
 def _interpret(xmRoot, options, args, myranker):
     ranked = 0
     acc    = 0
     times  = []
 
     for j, fn in enumerate(args):
-        if j%50 == 0: print >>sys.stderr, ".",
+        print >>sys.stderr, "\r", "[%4d/%4d] Processing %s..." % (1+j, len(args), fn)
 
         aspfiles  = [fn] if options.preamble != None else [fn, options.preamble]
         goldAtoms = readGoldAtoms(fn.replace(".pl", ".gold.interp"))
@@ -74,11 +74,11 @@ def _interpret(xmRoot, options, args, myranker):
 
         xmASS = etree.Element("answersets")
         xmRoot.append(xmASS)
-        
+
         if 0 < len(ret):
             ranked += 1
             numCorrect = 0
-            
+
             for a in ret:
                 xmResult = etree.Element("answerset",
                                          score="%f" % a.score,
@@ -90,10 +90,12 @@ def _interpret(xmRoot, options, args, myranker):
                 if set(goldAtoms).issubset(set(a.answerset)):
                     xmResult.attrib["result"] = "1"
                     numCorrect += 1
-                    
+
             acc += min(1, numCorrect)
 
-            
+
+    print >>sys.stderr, "Done."
+
     # Write the current accuracy.
     xmAccuracy = _writePerformance(acc, ranked, len(args), times)
     xmRoot.append(xmAccuracy)
@@ -102,7 +104,7 @@ def _interpret(xmRoot, options, args, myranker):
         "acc.  =", xmAccuracy.attrib["accuracy"], \
         "prec. =", xmAccuracy.attrib["prec"]
 
-    
+
 def _writePerformance(acc, ranked, len_args, times):
     return etree.Element("performance",
                          accuracy="%.1f" % (100.0*acc/len_args),
@@ -113,7 +115,7 @@ def _writePerformance(acc, ranked, len_args, times):
                          time="%.2f" % (sum(times) / len(times)),
                      )
 
-    
+
 if "__main__" == __name__:
     cmdparser = optparse.OptionParser(description="INPACT interpreter.")
     cmdparser.add_option("--preamble", help="")

@@ -61,13 +61,13 @@ def collectOntological(sent):
 
             for lms in s.lemmas():
                 if lms.name().lower() == lemma.lower(): continue
-                
+
                 print "%s_%s(X) :- %s_%s(X), use_synonym." % (
                     _sanitize(lms.name().lower()), pos[0].lower(),
                     _sanitize(lemma.lower()), pos[0].lower(), )
 
                 concepts += [("%s_%s" % (lms.name().lower(), pos[0].lower()), lms.name(), ner)]
-                
+
             for sh in s.hypernyms():
                 for lmh in sh.lemma_names():
                     print "%s_%s(X) :- %s_%s(X), use_hypernym." % (_sanitize(lmh.lower()), pos[0].lower(), _sanitize(lemma.lower()), pos[0].lower(), )
@@ -125,6 +125,10 @@ def collectEventRels(sent, mention2const):
             lemma = sent.xpath("./tokens/token[@id=%s]/lemma/text()" % de)[0]
             word = sent.xpath("./tokens/token[@id=%s]/word/text()" % de)[0]
 
+            if not mention2const.has_key(gov):
+                print >>sys.stderr, "Uncaught Error:", "Pronoun is not in mention predicates."
+                continue
+
             print "pronoun(tok_%s_%s)." % (de, word.lower())
             print "position(tok_%s_%s, %s)." % (de, word.lower(), de)
             print "1 {pronominalized(X, tok_%s_%s): mention(X)} 1." % (de, word.lower())
@@ -134,13 +138,13 @@ def collectEventRels(sent, mention2const):
                 dt, mention2const[gov][1],
                 de, word.lower(),
                 )
-            
-        else:
-            try:
-                print "%s(%s, %s)." % (dt, mention2const[gov][1], mention2const[de][1])
 
-            except KeyError:
-                print >>sys.stderr, "Uncaught error!"
+        else:
+            if not mention2const.has_key(gov) or not mention2const.has_key(de):
+                print >>sys.stderr, "Uncaught Error:", "Elements are not in mention predicates."
+                continue
+
+            print "%s(%s, %s)." % (dt, mention2const[gov][1], mention2const[de][1])
 
 
 def collectFeatures(sent, mention2const, concepts):
@@ -149,7 +153,7 @@ def collectFeatures(sent, mention2const, concepts):
         "/work/naoya-i/kb/ncnaive0909.0.cdb",
         "/work/naoya-i/kb/tuples.0909.tuples.cdb")
     gn = googlengram.googlengram_t("/work/jun-s/kb/ngrams")
-    
+
     relations = [
         dt for dt in sent.xpath("./dependencies[@type='collapsed-ccprocessed-dependencies']/dep/@type")
         if dt in "nsubj dobj nsubjpass iobj" or dt.startswith("nmod:")]
@@ -165,7 +169,7 @@ def collectFeatures(sent, mention2const, concepts):
                 mention2const[m][1],
                 tok.attrib["id"], tok.xpath("./word/text()")[0],
                 )
-            
+
             print ":~ %s. [f_surf_%s_%s(1)@1, surf_%s_%s, tok_%s, m_%s] " % (
                 myatom,
                 mention2const[m][1].split("_")[-1], tok.xpath("./word/text()")[0],
@@ -175,13 +179,13 @@ def collectFeatures(sent, mention2const, concepts):
                 )
 
             tokMen = sent.xpath("./tokens/token[@id='%s']" % m)[0]
-            
+
             # Look at the predicate of this pronoun.
             for gov in sent.xpath("./dependencies[@type='collapsed-ccprocessed-dependencies']/dep[@type='nsubj' and ./dependent/@idx='%s']/governor/@idx" % tok.attrib["id"]):
                 tokGov = sent.xpath("./tokens/token[@id='%s']" % gov)[0]
                 freqx, freqy, freq = 0, 0, 0
                 qtype  = ""
-                
+
                 if "JJ" == tokGov.xpath("./POS/text()")[0]:
                     q1, q2 = tokGov.xpath("./lemma/text()")[0], tokMen.xpath("./lemma/text()")[0]
                     qtype  = "JJNN"
@@ -192,7 +196,7 @@ def collectFeatures(sent, mention2const, concepts):
 
                 if "" != qtype:
                     freqx, freqy, freq = gn.search([q1]), gn.search([q2]), gn.search([q1, q2])
-                    
+
                 if 0 < freq:
                     print ":~ %s. [f_google_%s(%f)@1, google_%s, tok_%s, m_%s] %% %s, %s" % (
                         myatom,
@@ -203,8 +207,8 @@ def collectFeatures(sent, mention2const, concepts):
                         m,
                         q1, q2,
                         )
-                    
-                
+
+
     for dt in relations:
         for cv, cvw, cvner in concepts:
             if "be_v" == cv: continue
@@ -265,8 +269,8 @@ def collectFeatures(sent, mention2const, concepts):
                     )
 
 
-def main():
-    x = etree.parse(sys.argv[1])
+def main(args):
+    x = etree.parse(args[0])
 
     for sent in x.xpath("/root/document/sentences/sentence"):
         print "%"
@@ -297,4 +301,4 @@ def main():
 
 
 if "__main__" == __name__:
-    main()
+    main(sys.args)
