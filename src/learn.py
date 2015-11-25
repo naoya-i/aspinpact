@@ -74,6 +74,7 @@ def _learn(xmRoot, options, args, myranker):
             xmRoot.append(xmEpoch)
 
         ranked      = 0
+        tie         = 0
         acc         = 0
         stat        = [0]*5
         loss, times = [], []
@@ -112,11 +113,13 @@ def _learn(xmRoot, options, args, myranker):
 
                 times += [myranker.lastInferenceTime]
 
-                if 0 < len(correctPredictions):
+                if 0 < len(correctPredictions) and 0 < len(wrongPredictions):
                     ranked += 1
 
-                    if 0 == len(wrongPredictions) or \
-                       correctPredictions[-1].score > wrongPredictions[-1].score:
+                    if correctPredictions[0].score == wrongPredictions[0].score:
+                        tie += 1
+
+                    elif correctPredictions[0].score > wrongPredictions[0].score:
                         acc += 1
 
         print >>sys.stderr, "Done."
@@ -131,6 +134,12 @@ def _learn(xmRoot, options, args, myranker):
 
             print >>sys.stderr, "loss =", xmLoss.attrib["loss"]
             print >>sys.stderr, "Fitting...",
+            print >>sys.stderr, "# examples = %d (+:%d/-:%d)" % (
+                len(myranker.trainingExamples),
+                len(filter(lambda x: x==1, myranker.trainingLabels)),
+                len(filter(lambda x: x==-1, myranker.trainingLabels)),
+                )
+                
 
             isConverged = myranker.fit()
 
@@ -146,13 +155,17 @@ def _learn(xmRoot, options, args, myranker):
         else:
 
             # Write the current accuracy.
-            xmAccuracy = _writePerformance(acc, ranked, len(args), times)
+            xmAccuracy = _writePerformance(acc, tie, ranked, len(args), times)
             xmEpoch.append(xmAccuracy)
 
             print >>sys.stderr, \
                 "acc.  =", xmAccuracy.attrib["accuracy"], \
-                "prec. =", xmAccuracy.attrib["prec"]
+                "prec. =", xmAccuracy.attrib["prec"], \
+                "tie   =", xmAccuracy.attrib["tie"], \
+                "correct =", xmAccuracy.attrib["correct"], \
+                "ranked =", xmAccuracy.attrib["ranked"]
 
+            
 
 def _writeLoss(stat, loss):
     return etree.Element("loss",
@@ -164,13 +177,14 @@ def _writeLoss(stat, loss):
                            loss="%.2f" % (sum(loss))
     )
 
-def _writePerformance(acc, ranked, len_args, times):
+def _writePerformance(acc, tie, ranked, len_args, times):
     return etree.Element("performance",
                          accuracy="%.1f" % (100.0*acc/len_args),
                          prec="%.1f" % (100.0*acc/ranked),
                          correct="%d" % acc,
-                         total="%d" % len_args,
+                         tie="%d" % tie,
                          ranked="%d" % ranked,
+                         total="%d" % len_args,
                          time="%.2f" % (sum(times) / len(times)),
                      )
 
@@ -187,6 +201,8 @@ def _writeParams(options):
         xmParams.attrib[k] = str(v)
 
     def _tostr(k, v):
+        k = k.replace("_", "-")
+        
         if isinstance(v, bool):
             if v:
                 return "--%s" % k

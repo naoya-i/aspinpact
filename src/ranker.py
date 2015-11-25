@@ -5,10 +5,12 @@ import numpy as np
 import subprocess
 import collections
 import os
-import gurobipy as gp
 import cStringIO
 
 from sklearn.feature_extraction import DictVectorizer
+from sklearn.svm import LinearSVC
+from sklearn.metrics import accuracy_score
+
 from extractBestAnswerSet import *
 from scipy.sparse import dok_matrix, csr_matrix
 from autograd import grad
@@ -46,7 +48,7 @@ class answerset_ranker_t:
         self.epsilon = epsilon
         self.rescaling = rescaling
         self.normalization = normalization
-        self.updateAlg = alg
+        self.algo = alg
         self.weightInitializer = _myinit
         self.lastInferenceTime = 0
         self.myhash = hashlib.sha1(str(random.random())).hexdigest()
@@ -54,14 +56,18 @@ class answerset_ranker_t:
         self.minmax = {}
         self.trainingExamples = []
         self.trainingLabels = []
+        self.nPrevTrainingEx = 0
 
 
     def load(self, xml, epoch = -1):
         x = etree.parse(xml)
 
+        r = x.xpath("/root/ranker")[0]
         w = x.xpath("/root/ranker/weight/text()")[0] if -1 == epoch else x.xpath("/root/epoch/weight/text()")[epoch]
         m = x.xpath("/root/ranker/minmax/text()")[0]
-
+        
+        self.normalization = eval(r.attrib["normalization"])
+        self.rescaling = eval(r.attrib["rescaling"])
         self.features = eval(w)
         self.minmax   = eval(m)
         self.setupFeatures()
@@ -69,7 +75,10 @@ class answerset_ranker_t:
 
 
     def serialize(self):
-        xmRanker = etree.Element("ranker")
+        xmRanker = etree.Element("ranker",
+                                 normalization="%s" % self.normalization,
+                                 rescaling="%s" % self.rescaling,
+        )
 
         xmMinmax = etree.Element("minmax")
         xmRanker.append(xmMinmax)
@@ -143,10 +152,11 @@ class answerset_ranker_t:
         return self.normalize(vec)
 
 
-    def predict(self, lpfiles, goldAtoms=[], weight=None, lossAugmented=False, exclude=False, enum=False, eco=False):
+    def predict(self, lpfiles, goldAtoms=[], weight=None, lossAugmented=False, exclude=False, enum=False, eco=False, maximize=True):
         regexWeakConstraint = re.compile("^:~(.*?)\[f_(.*?)\(([-0-9.e]+)\)@(.*?)\]")
 
-        if weight is None: weight = self.coef_
+        if weight is None:
+            weight = self.coef_ if maximize else -self.coef_
 
         # Generate feature-weighted answer set program.
         tmpf = cStringIO.StringIO()
@@ -176,15 +186,15 @@ class answerset_ranker_t:
 
                     if not eco:
                         print >>tmpf, "f_%s(%s, %s) :- %s" % (fname, _sanitize(fvalue), binder, constraint)
-                        print >>tmpf, ":~ f_%s(%s, %s). [%d@1, %s]" % (
+                        print >>tmpf, ":~ f_%s(%s, %s). [%d@1, %s, %s]" % (
                             fname, _sanitize(fvalue), binder,
-                            int(-RESOLUTION*weight[fidx]*fvalue), binder)
+                            int(-RESOLUTION*weight[fidx]*fvalue), fname, binder)
 
                     else:
                         # If we do not have to recover the feature vector, then.
-                        print >>tmpf, ":~ %s [%d@1, %s]" % (
+                        print >>tmpf, ":~ %s [%d@1, %s, %s]" % (
                             constraint,
-                            int(-RESOLUTION*weight[fidx]*fvalue), binder)
+                            int(-RESOLUTION*weight[fidx]*fvalue), fname, binder)
 
 
         # Constrain the answer set space to one including gold atoms.
@@ -226,6 +236,21 @@ class answerset_ranker_t:
 
 
     def fit(self):
+        if "svm" == self.algo:
+            if self.nPrevTrainingEx == len(self.trainingExamples):
+                return True
+
+            self.nPrevTrainingEx = len(self.trainingExamples)
+                
+            m = LinearSVC(C=self.C, max_iter=10000, fit_intercept=False, verbose=True)
+            m.fit(self.trainingExamples, self.trainingLabels)
+            self.coef_ = m.coef_[0]
+
+            print >>sys.stderr, "Closed discriminative power (acc.):", accuracy_score(self.trainingLabels, m.predict(self.trainingExamples))
+            # print >>sys.stderr, m.decision_function(self.trainingExamples)
+            
+            return False
+            
         self.coef_avg_ += [self.coef_.copy()]
         self.coef_ = self.getAveragedWeight()
         return False
@@ -233,17 +258,25 @@ class answerset_ranker_t:
 
     def feed(self, aspfiles, goldAtoms):
 
-        if "svm" == self.updateAlg:
-            posi = self.predict(aspfiles, goldAtoms, exclude=False)
-            nega = self.predict(aspfiles, goldAtoms, exclude=True)
+        if "svm" == self.algo:
+            posi = self.predict(aspfiles, goldAtoms, exclude=False, maximize=True)
+            nega = self.predict(aspfiles, goldAtoms, exclude=True,  maximize=True)
 
             if len(posi) == 0 or len(nega) == 0:
                 return answerset_ranker_t.NO_LVC, 0.0
 
-            self.trainingExamples += [self.getFeatureVector(posi[0].answerset), self.getFeatureVector(nega[0].answerset)]
-            self.trainingLabels   += [1, -1]
+            def _addTrainingDatum(x, y):
+                for t in self.trainingExamples:
+                    if np.array_equal(t, x): break
+                    
+                else:
+                    self.trainingExamples += [x]
+                    self.trainingLabels += [y]
+                
+            _addTrainingDatum(self.getFeatureVector(posi[0].answerset).toarray()[0] - self.getFeatureVector(nega[0].answerset).toarray()[0], 1)
+            _addTrainingDatum(self.getFeatureVector(nega[0].answerset).toarray()[0] - self.getFeatureVector(posi[0].answerset).toarray()[0], -1)
             
-            return answerset_ranker_t.UPDATED, 0.0
+            return answerset_ranker_t.UPDATED, 1 if nega[0].score - posi[0].score >= 0 else 0 # max(0, nega[0].score - posi[0].score)
         
         # First, guess what.
         predictions = self.predict(aspfiles)
@@ -276,12 +309,12 @@ class answerset_ranker_t:
     def _updateWeights(self, pCurrent, pGoal, goldAtoms):
         vCurrent, vGoal = self.getFeatureVector(pCurrent), self.getFeatureVector(pGoal)
 
-        if "latperc" == self.updateAlg:
+        if "latperc" == self.algo:
             self.coef_ += (vGoal - vCurrent).toarray()[0]
 
             return answerset_ranker_t.UPDATED, len(set(goldAtoms) - set(pCurrent))
 
-        elif self.updateAlg in ["PA-I", "PA-II"]:
+        elif self.algo in ["PA-I", "PA-II"]:
             w, c, g = self.coef_, vCurrent.toarray()[0], vGoal.toarray()[0]
             diff    = g - c
             loss = np.dot(w, c) - np.dot(w, g) + math.sqrt(len(set(goldAtoms) - set(pCurrent)))
@@ -290,15 +323,15 @@ class answerset_ranker_t:
             if norm2 == 0.0:
                 return answerset_ranker_t.INDISTINGUISHABLE, 0.0 # Cannot update.
 
-            if "PA-I" == self.updateAlg:    tau = min(self.C, loss / norm2)
-            elif "PA-II" == self.updateAlg: tau = loss / (norm2 + 1.0/(2*self.C))
+            if "PA-I" == self.algo:    tau = min(self.C, loss / norm2)
+            elif "PA-II" == self.algo: tau = loss / (norm2 + 1.0/(2*self.C))
 
             # Update the weights.
             self.coef_ = self.coef_ + tau * diff
 
             return answerset_ranker_t.UPDATED, loss
 
-        raise "Unsupported algorithm: %s" % self.updateAlg
+        raise "Unsupported algorithm: %s" % self.algo
 
 #
 # Helper functions.
@@ -309,5 +342,6 @@ def _drink(f):
     return f.replace("D", ".").replace("M", "-")[2:]
 
 def _myinit(fidx):
+    return 1
     random.seed(fidx)
     return 0.001*random.random()

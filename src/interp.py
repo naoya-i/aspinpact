@@ -104,7 +104,9 @@ def _interpret(xmRoot, options, args, myranker):
 
     print >>sys.stderr, \
         "acc.  =", xmAccuracy.attrib["accuracy"], \
-        "prec. =", xmAccuracy.attrib["prec"]
+        "prec. =", xmAccuracy.attrib["prec"], \
+        "correct =", xmAccuracy.attrib["correct"], \
+        "ranked =", xmAccuracy.attrib["ranked"]
 
 
 def _writePerformance(acc, ranked, len_args, times):
