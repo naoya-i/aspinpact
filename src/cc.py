@@ -170,14 +170,27 @@ def collectFeatures(sent, mention2const, concepts):
                 tok.attrib["id"], tok.xpath("./word/text()")[0],
                 )
 
-            print ":~ %s. [f_surf_%s_%s(1)@1, surf_%s_%s, tok_%s, m_%s] " % (
+            print ":~ %s. [f_surf_%s_%s(1)@1, tok_%s, m_%s] " % (
                 myatom,
-                mention2const[m][1].split("_")[-1], tok.xpath("./word/text()")[0],
                 mention2const[m][1].split("_")[-1], tok.xpath("./word/text()")[0],
                 tok.attrib["id"],
                 m,
                 )
 
+            print ":~ %s. [f_surf_%s(1)@1, tok_%s, m_%s] " % (
+                myatom,
+                mention2const[m][1].split("_")[-1],
+                tok.attrib["id"],
+                m,
+                )
+
+            print ":~ %s. [f_surf_%s(1)@1, tok_%s, m_%s] " % (
+                myatom,
+                tok.xpath("./word/text()")[0],
+                tok.attrib["id"],
+                m,
+                )
+            
             tokMen = sent.xpath("./tokens/token[@id='%s']" % m)[0]
 
             # Look at the predicate of this pronoun.
@@ -198,11 +211,10 @@ def collectFeatures(sent, mention2const, concepts):
                     freqx, freqy, freq = gn.search([q1]), gn.search([q2]), gn.search([q1, q2])
 
                 if 0 < freq:
-                    print ":~ %s. [f_google_%s(%f)@1, google_%s, tok_%s, m_%s] %% %s, %s" % (
+                    print ":~ %s. [f_google_%s(%f)@1, tok_%s, m_%s] %% %s, %s" % (
                         myatom,
                         qtype,
                         math.log(1.0*freq/((1.0*freqx/gn.TOTAL)*freqy)),
-                        qtype,
                         tok.attrib["id"],
                         m,
                         q1, q2,
@@ -261,7 +273,7 @@ def collectFeatures(sent, mention2const, concepts):
 
                     ncs = nc.getPMI(e1, e2)
 
-                    print ":~ %s(E1), %s(E1, X), %s(E2), %s(E2, X). [f_esa(%f)@1, esa, %s_x_%s_x_%s_x_%s, X, E1, E2]" % (
+                    print ":~ %s(E1), %s(E1, X), %s(E2), %s(E2, X). [f_esa(%f)@1, %s_x_%s_x_%s_x_%s, X, E1, E2]" % (
                         _sanitize(cv), dt.replace(":", "_"),
                         _sanitize(cv2), dt2.replace(":", "_"),
                         1.0*ncs,

@@ -60,7 +60,7 @@ def _interpret(xmRoot, options, args, myranker):
     for j, fn in enumerate(args):
         print >>sys.stderr, "\r", "[%4d/%4d] Processing %s..." % (1+j, len(args), fn),
 
-        aspfiles  = [fn] if options.preamble != None else [fn, options.preamble]
+        aspfiles  = [options.preamble, fn] if options.preamble != None else [fn]
         goldAtoms = readGoldAtoms(fn.replace(".pl", ".gold.interp"))
 
         # Just predict!
@@ -68,19 +68,22 @@ def _interpret(xmRoot, options, args, myranker):
         times += [myranker.lastInferenceTime]
 
         xmPredict = etree.Element("predict",
+                                  filename=fn,
                                   time="%.2f" % myranker.lastInferenceTime,
                                   goldAtoms=" ".join(goldAtoms),
                                   numAnswers="%d" % len(ret),
+                                  result="0",
+                                  score="0",
         )
         xmRoot.append(xmPredict)
 
         xmASS = etree.Element("answersets")
-        xmRoot.append(xmASS)
+        xmPredict.append(xmASS)
 
         if 0 < len(ret):
-            ranked += 1
-            numCorrect = 0
-
+            numCorrect, numWrong = 0, 0
+            xmPredict.attrib["score"] = "%f" % ret[0].score
+            
             for a in ret:
                 xmResult = etree.Element("answerset",
                                          score="%f" % a.score,
@@ -90,11 +93,23 @@ def _interpret(xmRoot, options, args, myranker):
                 xmASS.append(xmResult)
 
                 if set(goldAtoms).issubset(set(a.answerset)):
-                    xmResult.attrib["result"] = "1"
                     numCorrect += 1
+                else:
+                    numWrong += 1
 
-            acc += min(1, numCorrect)
+            if numCorrect > 0 and numWrong == 0:
+                xmResult.attrib["result"] = "1"
+                xmPredict.attrib["result"] = "1"
+                acc += 1
 
+            elif numCorrect == 0 and numWrong > 0:
+                xmResult.attrib["result"] = "-1"
+                xmPredict.attrib["result"] = "-1"
+
+            if numCorrect == 0 or numWrong == 0:
+                ranked += 1
+
+                
 
     print >>sys.stderr, "Done."
 
@@ -103,19 +118,19 @@ def _interpret(xmRoot, options, args, myranker):
     xmRoot.append(xmAccuracy)
 
     print >>sys.stderr, \
-        "acc.  =", xmAccuracy.attrib["accuracy"], \
-        "prec. =", xmAccuracy.attrib["prec"], \
-        "correct =", xmAccuracy.attrib["correct"], \
-        "ranked =", xmAccuracy.attrib["ranked"]
-
+        "acc.  = %s (%s/%s)" % (xmAccuracy.attrib["accuracy"], xmAccuracy.attrib["correct"], xmAccuracy.attrib["total"]), \
+        "prec. = %s (%s/%s)" % (xmAccuracy.attrib["prec"], xmAccuracy.attrib["correct"], xmAccuracy.attrib["ranked"]), \
+        "no dec. = %s" % (xmAccuracy.attrib["no_dec"])
 
 def _writePerformance(acc, ranked, len_args, times):
     return etree.Element("performance",
                          accuracy="%.1f" % (100.0*acc/len_args),
                          prec="%.1f" % (100.0*acc/ranked),
                          correct="%d" % acc,
-                         total="%d" % len_args,
+                         wrong="%d" % (ranked - acc),
+                         no_dec="%d" % (len_args - ranked),
                          ranked="%d" % ranked,
+                         total="%d" % len_args,
                          time="%.2f" % (sum(times) / len(times)),
                      )
 

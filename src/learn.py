@@ -22,6 +22,7 @@ def main(options, args):
         C=options.C,
         eta=options.eta,
         epsilon=options.epsilon,
+        pairwise=options.pairwise,
         alg=options.algo)
 
     # Collect all possible features
@@ -86,7 +87,7 @@ def _learn(xmRoot, options, args, myranker):
         for j, fn in enumerate(args):
             print >>sys.stderr, "\r", "[%4d/%4d] Processing %s..." % (1+j, len(args), fn),
 
-            aspfiles  = [fn] if options.preamble != None else [fn, options.preamble]
+            aspfiles  = [options.preamble, fn] if options.preamble != None else [fn]
             goldAtoms = readGoldAtoms(fn.replace(".pl", ".gold.interp"))
 
             if isUpdating:
@@ -102,6 +103,10 @@ def _learn(xmRoot, options, args, myranker):
                                                   filename=fn,
                     )
                     xmEpoch.append(xmProblemwise)
+                    # xmProblemwise.text = "%s\n%s" % (
+                    #     " ".join(myranker.lastPosi.answerset),
+                    #     " ".join(myranker.lastNega.answerset),
+                    #     )
 
                 stat[ret] += 1
                 loss += [myloss]
@@ -223,6 +228,7 @@ if "__main__" == __name__:
     cmdparser = optparse.OptionParser(description="Weight Learner for ASP.")
     cmdparser.add_option("--preamble", help="")
     cmdparser.add_option("--output", help="")
+    cmdparser.add_option("--pairwise", action="store_true", help="")
     cmdparser.add_option("--algo", default="latperc", help="")
     cmdparser.add_option("--iter", type=int, default=5, help="The number of iterations.")
     cmdparser.add_option("--C", type=float, default=0.01)

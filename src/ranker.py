@@ -37,8 +37,9 @@ class answerset_ranker_t:
     INDISTINGUISHABLE = 3
     CANNOT_PREDICT = 4
 
-    def __init__(self, eta=0.01, C = 0.0001, epsilon=0.01, alg="latperc", rescaling=True,
-                 normalization=True,
+    def __init__(self, eta=0.01, C = 0.0001, epsilon=0.01,
+                 alg="latperc", rescaling=True, normalization=True,
+                 pairwise=False,
     ):
         self.dv = DictVectorizer()
         self.coef_ = None
@@ -57,6 +58,7 @@ class answerset_ranker_t:
         self.trainingExamples = []
         self.trainingLabels = []
         self.nPrevTrainingEx = 0
+        self.pairwise = pairwise
 
 
     def load(self, xml, epoch = -1):
@@ -213,7 +215,7 @@ class answerset_ranker_t:
         pClingo = subprocess.Popen(
             ["/home/naoya-i/tmp/clingo-4.5.3-linux-x86_64/clingo",
              "-n 0",
-             "--opt-mode=opt" if not enum else "--opt-mode=enum",
+             "--opt-mode=optN" if not enum else "--opt-mode=enum",
              ],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
@@ -236,18 +238,30 @@ class answerset_ranker_t:
 
 
     def fit(self):
-        if "svm" == self.algo:
+        if self.algo in ["batch", "iterative"]:
             if self.nPrevTrainingEx == len(self.trainingExamples):
                 return True
 
             self.nPrevTrainingEx = len(self.trainingExamples)
                 
-            m = LinearSVC(C=self.C, max_iter=10000, fit_intercept=False, verbose=True)
+            m = LinearSVC(C=self.C, max_iter=100000, fit_intercept=True, verbose=True)
             m.fit(self.trainingExamples, self.trainingLabels)
             self.coef_ = m.coef_[0]
+            self.m = m
 
             print >>sys.stderr, "Closed discriminative power (acc.):", accuracy_score(self.trainingLabels, m.predict(self.trainingExamples))
+            
+            # print >>sys.stderr, self.coef_
+            # print >>sys.stderr, self.trainingExamples[0]
             # print >>sys.stderr, m.decision_function(self.trainingExamples)
+            # print >>sys.stderr, m.predict(self.trainingExamples)
+            # print >>sys.stderr, self.trainingLabels
+            # print >>sys.stderr, self.trainingExamples[1]
+            # print >>sys.stderr, m.decision_function(self.trainingExamples[1])
+            # print >>sys.stderr, m.decision_function(self.trainingExamples[0])[0] - m.decision_function(self.trainingExamples[1])[0]
+
+            if "batch" == self.algo:
+                return True
             
             return False
             
@@ -258,13 +272,7 @@ class answerset_ranker_t:
 
     def feed(self, aspfiles, goldAtoms):
 
-        if "svm" == self.algo:
-            posi = self.predict(aspfiles, goldAtoms, exclude=False, maximize=True)
-            nega = self.predict(aspfiles, goldAtoms, exclude=True,  maximize=True)
-
-            if len(posi) == 0 or len(nega) == 0:
-                return answerset_ranker_t.NO_LVC, 0.0
-
+        if self.algo in ["batch", "iterative"]:
             def _addTrainingDatum(x, y):
                 for t in self.trainingExamples:
                     if np.array_equal(t, x): break
@@ -272,11 +280,33 @@ class answerset_ranker_t:
                 else:
                     self.trainingExamples += [x]
                     self.trainingLabels += [y]
-                
-            _addTrainingDatum(self.getFeatureVector(posi[0].answerset).toarray()[0] - self.getFeatureVector(nega[0].answerset).toarray()[0], 1)
-            _addTrainingDatum(self.getFeatureVector(nega[0].answerset).toarray()[0] - self.getFeatureVector(posi[0].answerset).toarray()[0], -1)
+
+            _enum  = self.algo == "batch"
+            sp, sn = -99999, -99999
+
+            if self.pairwise:
+                for posi in self.predict(aspfiles, goldAtoms, exclude=False, maximize=True, enum=_enum):
+                    for nega in self.predict(aspfiles, goldAtoms, exclude=True,  maximize=True, enum=_enum):
+                        _addTrainingDatum(self.getFeatureVector(posi.answerset).toarray()[0] - self.getFeatureVector(nega.answerset).toarray()[0], 1)
+                        _addTrainingDatum(self.getFeatureVector(nega.answerset).toarray()[0] - self.getFeatureVector(posi.answerset).toarray()[0], -1)
+                        sp = max(sp, posi.score)
+                        sn = max(sn, nega.score)
+
+            else:
+                for posi in self.predict(aspfiles, goldAtoms, exclude=False, maximize=True, enum=_enum):
+                    _addTrainingDatum(self.getFeatureVector(posi.answerset).toarray()[0], 1)
+                    sp = max(sp, posi.score)
+                    self.lastPosi = posi
+
+                for nega in self.predict(aspfiles, goldAtoms, exclude=True,  maximize=True, enum=_enum):
+                    _addTrainingDatum(self.getFeatureVector(nega.answerset).toarray()[0], -1)
+                    sn = max(sn, nega.score)
+                    self.lastNega = nega
             
-            return answerset_ranker_t.UPDATED, 1 if nega[0].score - posi[0].score >= 0 else 0 # max(0, nega[0].score - posi[0].score)
+            if sp == -99999 or sn == -99999:
+                return answerset_ranker_t.NO_LVC, 0.0
+
+            return answerset_ranker_t.UPDATED, max(0, sn-sp)
         
         # First, guess what.
         predictions = self.predict(aspfiles)
