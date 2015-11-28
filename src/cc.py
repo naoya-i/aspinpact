@@ -85,7 +85,23 @@ def collectMentions(sent):
     # Assign constants to nouns and events.
     mention2const = {}
 
-    for tok in sent.xpath("./tokens/token"):
+    # To identify head nouns, we collect nouns are is mentioned in
+    # dependency tuples.
+    heads = []
+    
+    for dep in sent.xpath("./dependencies[@type='collapsed-ccprocessed-dependencies']/dep"):
+        if dep.attrib['type'] == "compound":
+            continue
+
+        gov, de = dep.xpath("./governor/@idx")[0], dep.xpath("./dependent/@idx")[0]
+
+        if gov != "0":
+            heads += [sent.xpath("./tokens/token[@id='%s']" % gov)[0]]
+            
+        if de != "0":
+            heads += [sent.xpath("./tokens/token[@id='%s']" % de)[0]]
+        
+    for tok in set(heads):
         text = tok.xpath("./word/text()")[0].lower()
         lemma = tok.xpath("./lemma/text()")[0].lower()
         ner  = tok.xpath("./NER/text()")[0].lower()
@@ -132,10 +148,10 @@ def collectEventRels(sent, mention2const):
             print "pronoun(tok_%s_%s)." % (de, word.lower())
             print "position(tok_%s_%s, %s)." % (de, word.lower(), de)
             print "1 {pronominalized(X, tok_%s_%s): mention(X)} 1." % (de, word.lower())
-            print "3 {%s(X); %s(X); %s(%s, X)} :- pronominalized(X, tok_%s_%s)." % (
+            print "3 {%s(X); %s(X); rel(%s, %s, X)} :- pronominalized(X, tok_%s_%s)." % (
                 _getNumber(lemma),
                 _getGender(lemma),
-                dt, mention2const[gov][1],
+                mention2const[gov][1], dt,
                 de, word.lower(),
                 )
 
@@ -144,7 +160,7 @@ def collectEventRels(sent, mention2const):
                 print >>sys.stderr, "Uncaught Error:", "Elements are not in mention predicates."
                 continue
 
-            print "%s(%s, %s)." % (dt, mention2const[gov][1], mention2const[de][1])
+            print "rel(%s, %s, %s)." % (mention2const[gov][1], dt, mention2const[de][1])
 
 
 def collectFeatures(sent, mention2const, concepts):
@@ -241,7 +257,7 @@ def collectFeatures(sent, mention2const, concepts):
 
                 if sps[1] < 1: continue
 
-                print ":~ %s(E), %s(E, X), %s(X). [f_selpref(%f)@1, %s_x_%s_x_%s, X, E] %% %s, %s, %s" % (
+                print ":~ %s(E), rel(E, %s, X), %s(X). [f_selpref(%f)@1, %s_x_%s_x_%s, X, E] %% %s, %s, %s" % (
                     _sanitize(cv),
                     dt.replace(":", "_"),
                     _sanitize(cn),
@@ -272,8 +288,8 @@ def collectFeatures(sent, mention2const, concepts):
                     if nc.getFreq(e1, e2) < 1: continue
 
                     ncs = nc.getPMI(e1, e2)
-
-                    print ":~ %s(E1), %s(E1, X), %s(E2), %s(E2, X). [f_esa(%f)@1, %s_x_%s_x_%s_x_%s, X, E1, E2]" % (
+                    
+                    print ":~ %s(E1), rel(E1, %s, X), %s(E2), rel(E2, %s, X). [f_esa(%f)@1, %s_x_%s_x_%s_x_%s, X, E1, E2]" % (
                         _sanitize(cv), dt.replace(":", "_"),
                         _sanitize(cv2), dt2.replace(":", "_"),
                         1.0*ncs,

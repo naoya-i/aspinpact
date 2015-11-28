@@ -57,6 +57,7 @@ class answerset_ranker_t:
         self.minmax = {}
         self.trainingExamples = []
         self.trainingLabels = []
+        self.trainingHash = {}
         self.nPrevTrainingEx = 0
         self.pairwise = pairwise
 
@@ -270,36 +271,39 @@ class answerset_ranker_t:
         return False
 
 
+    def _addTrainingDatum(self, x, y):
+        h = hashlib.sha1(repr(x)).hexdigest()
+        
+        if self.trainingHash.has_key(h):
+            return
+
+        self.trainingExamples += [x]
+        self.trainingLabels += [y]
+        self.trainingHash[h] = None
+        
+        
     def feed(self, aspfiles, goldAtoms):
 
         if self.algo in ["batch", "iterative"]:
-            def _addTrainingDatum(x, y):
-                for t in self.trainingExamples:
-                    if np.array_equal(t, x): break
-                    
-                else:
-                    self.trainingExamples += [x]
-                    self.trainingLabels += [y]
-
             _enum  = self.algo == "batch"
             sp, sn = -99999, -99999
 
             if self.pairwise:
                 for posi in self.predict(aspfiles, goldAtoms, exclude=False, maximize=True, enum=_enum):
                     for nega in self.predict(aspfiles, goldAtoms, exclude=True,  maximize=True, enum=_enum):
-                        _addTrainingDatum(self.getFeatureVector(posi.answerset).toarray()[0] - self.getFeatureVector(nega.answerset).toarray()[0], 1)
-                        _addTrainingDatum(self.getFeatureVector(nega.answerset).toarray()[0] - self.getFeatureVector(posi.answerset).toarray()[0], -1)
+                        self._addTrainingDatum(self.getFeatureVector(posi.answerset).toarray()[0] - self.getFeatureVector(nega.answerset).toarray()[0], 1)
+                        self._addTrainingDatum(self.getFeatureVector(nega.answerset).toarray()[0] - self.getFeatureVector(posi.answerset).toarray()[0], -1)
                         sp = max(sp, posi.score)
                         sn = max(sn, nega.score)
 
             else:
                 for posi in self.predict(aspfiles, goldAtoms, exclude=False, maximize=True, enum=_enum):
-                    _addTrainingDatum(self.getFeatureVector(posi.answerset).toarray()[0], 1)
+                    self._addTrainingDatum(self.getFeatureVector(posi.answerset).toarray()[0], 1)
                     sp = max(sp, posi.score)
                     self.lastPosi = posi
 
                 for nega in self.predict(aspfiles, goldAtoms, exclude=True,  maximize=True, enum=_enum):
-                    _addTrainingDatum(self.getFeatureVector(nega.answerset).toarray()[0], -1)
+                    self._addTrainingDatum(self.getFeatureVector(nega.answerset).toarray()[0], -1)
                     sn = max(sn, nega.score)
                     self.lastNega = nega
             
