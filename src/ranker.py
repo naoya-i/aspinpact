@@ -281,7 +281,7 @@ class answerset_ranker_t:
         return False
 
 
-    def _addTrainingDatum(self, x, y):
+    def feed(self, x, y):
         h = hashlib.sha1(repr(x)).hexdigest()
         
         if self.trainingHash.has_key(h):
@@ -292,100 +292,36 @@ class answerset_ranker_t:
         self.trainingHash[h] = None
         
         
-    def feed(self, aspfiles, goldAtoms, poke=False):
+    def poke(self, aspfiles, goldAtoms):
 
-        if self.algo in ["batch", "iterative"]:
-            _enum  = self.algo == "batch"
-            sp, sn = -99999, -99999
-            ret    = []
-            
-            if self.pairwise:
-                for posi in self.predict(aspfiles, goldAtoms, exclude=False, maximize=True, enum=_enum):
-                    for nega in self.predict(aspfiles, goldAtoms, exclude=True,  maximize=True, enum=_enum):
-                        if poke:
-                            ret += [(self.getFeatureVector(posi.answerset).toarray()[0] - self.getFeatureVector(nega.answerset).toarray()[0], 1)]
-                            ret += [(self.getFeatureVector(nega.answerset).toarray()[0] - self.getFeatureVector(posi.answerset).toarray()[0], -1)]
+        _enum  = self.algo == "batch"
+        sp, sn = -99999, -99999
+        ret    = []
 
-                        else:
-                            self._addTrainingDatum(self.getFeatureVector(posi.answerset).toarray()[0] - self.getFeatureVector(nega.answerset).toarray()[0], 1)
-                            self._addTrainingDatum(self.getFeatureVector(nega.answerset).toarray()[0] - self.getFeatureVector(posi.answerset).toarray()[0], -1)
-                            
-                        sp = max(sp, posi.score)
-                        sn = max(sn, nega.score)
-
-                return ret
-
-                
-            else:
-                for posi in self.predict(aspfiles, goldAtoms, exclude=False, maximize=True, enum=_enum):
-                    self._addTrainingDatum(self.getFeatureVector(posi.answerset).toarray()[0], 1)
-                    sp = max(sp, posi.score)
-                    self.lastPosi = posi
-
+        if self.pairwise:
+            for posi in self.predict(aspfiles, goldAtoms, exclude=False, maximize=True, enum=_enum):
                 for nega in self.predict(aspfiles, goldAtoms, exclude=True,  maximize=True, enum=_enum):
-                    self._addTrainingDatum(self.getFeatureVector(nega.answerset).toarray()[0], -1)
+                    ret += [(self.getFeatureVector(posi.answerset).toarray()[0] - self.getFeatureVector(nega.answerset).toarray()[0], 1)]
+                    ret += [(self.getFeatureVector(nega.answerset).toarray()[0] - self.getFeatureVector(posi.answerset).toarray()[0], -1)]
+                    sp = max(sp, posi.score)
                     sn = max(sn, nega.score)
-                    self.lastNega = nega
-            
-            if sp == -99999 or sn == -99999:
-                return answerset_ranker_t.NO_LVC, 0.0
 
-            return answerset_ranker_t.UPDATED, max(0, sn-sp)
-        
-        # First, guess what.
-        predictions = self.predict(aspfiles)
+        else:
+            for posi in self.predict(aspfiles, goldAtoms, exclude=False, maximize=True, enum=_enum):
+                ret += [(self.getFeatureVector(posi.answerset).toarray()[0], 1)]
+                sp = max(sp, posi.score)
+                self.lastPosi = posi
 
-        if 0 == len(predictions):
-            return answerset_ranker_t.CANNOT_PREDICT, 0.0
+            for nega in self.predict(aspfiles, goldAtoms, exclude=True,  maximize=True, enum=_enum):
+                ret += [(self.getFeatureVector(nega.answerset).toarray()[0], -1)]
+                sn = max(sn, nega.score)
+                self.lastNega = nega
 
-        pcur = predictions[0]
+        if sp == -99999 or sn == -99999:
+            return answerset_ranker_t.NO_LVC, 0.0, ret
 
-        # Is the guess correct?
-        if set(goldAtoms).issubset(set(pcur.answerset)):
-            return answerset_ranker_t.CORRECT, 0.0
+        return answerset_ranker_t.UPDATED, max(0, sn-sp), ret
 
-        # Guess correct label.
-        goals = self.predict(aspfiles, goldAtoms)
-
-        # Find answer set containing gold atoms.
-        if 0 == len(goals):
-            return answerset_ranker_t.NO_LVC, 0.0
-
-        pgoal = goals[0]
-
-        # If it is not inferred, then give up.
-        assert(not set(goldAtoms).issubset(set(pcur.answerset)))
-        assert(set(goldAtoms).issubset(set(pgoal.answerset)))
-
-        return self._updateWeights(pcur.answerset, pgoal.answerset, goldAtoms)
-
-
-    def _updateWeights(self, pCurrent, pGoal, goldAtoms):
-        vCurrent, vGoal = self.getFeatureVector(pCurrent), self.getFeatureVector(pGoal)
-
-        if "latperc" == self.algo:
-            self.coef_ += (vGoal - vCurrent).toarray()[0]
-
-            return answerset_ranker_t.UPDATED, len(set(goldAtoms) - set(pCurrent))
-
-        elif self.algo in ["PA-I", "PA-II"]:
-            w, c, g = self.coef_, vCurrent.toarray()[0], vGoal.toarray()[0]
-            diff    = g - c
-            loss = np.dot(w, c) - np.dot(w, g) + math.sqrt(len(set(goldAtoms) - set(pCurrent)))
-            norm2 = np.linalg.norm(diff) ** 2
-
-            if norm2 == 0.0:
-                return answerset_ranker_t.INDISTINGUISHABLE, 0.0 # Cannot update.
-
-            if "PA-I" == self.algo:    tau = min(self.C, loss / norm2)
-            elif "PA-II" == self.algo: tau = loss / (norm2 + 1.0/(2*self.C))
-
-            # Update the weights.
-            self.coef_ = self.coef_ + tau * diff
-
-            return answerset_ranker_t.UPDATED, loss
-
-        raise "Unsupported algorithm: %s" % self.algo
 
 #
 # Helper functions.

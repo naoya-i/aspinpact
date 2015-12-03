@@ -68,7 +68,7 @@ def _parPredict(args):
     myranker, lp = args
     goldAtoms    = readGoldAtoms(lp.replace(".pl", ".gold.interp"))
     
-    return myranker.feed([lp], goldAtoms, poke=True)
+    return myranker.poke([lp], goldAtoms)
 
     
 def _learn(xmRoot, options, args, myranker):
@@ -76,7 +76,7 @@ def _learn(xmRoot, options, args, myranker):
 
     isConverged = False
 
-    p = multiprocessing.Pool(2)
+    p = multiprocessing.Pool(options.parallel)
     
     for i in xrange(options.iter*2):
         if i%2 == 0:
@@ -93,54 +93,35 @@ def _learn(xmRoot, options, args, myranker):
 
         if not isUpdating and not options.report_perf:
             continue
-
-        for exs in p.map(_parPredict, [(myranker, fn) for fn in args]):
-            for e in exs:
-                myranker._addTrainingDatum(e[0], e[1])
         
-        # for j, fn in enumerate(args):
-        #     print >>sys.stderr, "\r", "[%4d/%4d] Processing %s..." % (1+j, len(args), fn),
+        def _cb(a):
+            print >>sys.stderr, "HEY!", a[1]
+            return
+            
+        processed = 0
+        
+        for fns in itertools.izip_longest(*[iter(args)]*options.chunk):
+            print >>sys.stderr, "\r", "[%4d/%4d] Processing..." % (processed, len(args))
+            
+            for status, myloss, examples in p.map(_parPredict, [(myranker, fn) for fn in fns if None != fn]):
+                if options.debug:
+                    xmProblemwise = etree.Element("problemwise",
+                                                  statusCode="%d" % status,
+                                                  loss="%.2f" % myloss,
+                                                  filename=fn,
+                    )
 
-        #     aspfiles  = [options.preamble, fn] if options.preamble != None else [fn]
-        #     goldAtoms = readGoldAtoms(fn.replace(".pl", ".gold.interp"))
+                    xmEpoch.append(xmProblemwise)
 
-        #     if isUpdating:
+                stat[status] += 1
+                loss += [myloss]
 
-        #         # Feed the example to the learner.
-        #         ret, myloss = myranker.feed(aspfiles, goldAtoms)
+                for ex in examples:
+                    myranker.feed(ex[0], ex[1])
 
-        #         if options.debug:
-        #             xmProblemwise = etree.Element("problemwise",
-        #                                           statusCode="%d" % ret,
-        #                                           loss="%.2f" % myloss,
-        #                                           time="%.2f" % myranker.lastInferenceTime,
-        #                                           filename=fn,
-        #             )
-        #             xmEpoch.append(xmProblemwise)
-        #             # xmProblemwise.text = "%s\n%s" % (
-        #             #     " ".join(myranker.lastPosi.answerset),
-        #             #     " ".join(myranker.lastNega.answerset),
-        #             #     )
-
-        #         stat[ret] += 1
-        #         loss += [myloss]
-
-        #     else:
-        #         # Just predict!
-        #         correctPredictions = myranker.predict(aspfiles, goldAtoms, exclude=False)
-        #         wrongPredictions = myranker.predict(aspfiles, goldAtoms, exclude=True)
-
-        #         times += [myranker.lastInferenceTime]
-
-        #         if 0 < len(correctPredictions) and 0 < len(wrongPredictions):
-        #             ranked += 1
-
-        #             if correctPredictions[0].score == wrongPredictions[0].score:
-        #                 tie += 1
-
-        #             elif correctPredictions[0].score > wrongPredictions[0].score:
-        #                 acc += 1
-
+            processed += options.chunk
+            
+                
         print >>sys.stderr, "Done."
 
         #
@@ -244,6 +225,8 @@ if "__main__" == __name__:
     cmdparser.add_option("--output", help="")
     cmdparser.add_option("--pairwise", action="store_true", help="")
     cmdparser.add_option("--algo", default="latperc", help="")
+    cmdparser.add_option("--parallel", type=int, default=1, help="The number of parallel processes.")
+    cmdparser.add_option("--chunk", type=int, default=50, help="Chunk size of parallel processing.")
     cmdparser.add_option("--iter", type=int, default=5, help="The number of iterations.")
     cmdparser.add_option("--C", type=float, default=0.01)
     cmdparser.add_option("--eta", type=float, default=0.1)
