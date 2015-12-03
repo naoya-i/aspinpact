@@ -6,6 +6,7 @@ import csv
 import optparse
 import collections
 import itertools
+import multiprocessing
 
 import numpy as np
 import scipy.sparse as ss
@@ -40,6 +41,14 @@ def main(options, args):
     _output(options.output, xmRoot)
 
     return xmRoot
+
+
+def _parPredict(args):
+    myranker, lp = args
+    goldAtoms    = readGoldAtoms(lp.replace(".pl", ".gold.interp"))
+    a            = myranker.predict([lp], eco=True)
+    
+    return lp, myranker.lastInferenceTime, goldAtoms, a
     
 
 def _output(out, xmRoot):
@@ -56,58 +65,59 @@ def _interpret(xmRoot, options, args, myranker):
     ranked = 0
     acc    = 0
     times  = []
+    processed = 0
 
-    for j, fn in enumerate(args):
-        print >>sys.stderr, "\r", "[%4d/%4d] Processing %s..." % (1+j, len(args), fn),
+    p = multiprocessing.Pool(options.parallel)
+    
+    for fns in itertools.izip_longest(*[iter(args)]*options.chunk):
+        print >>sys.stderr, "\r", "[%4d/%4d] Processing..." % (processed, len(args)),
 
-        aspfiles  = [options.preamble, fn] if options.preamble != None else [fn]
-        goldAtoms = readGoldAtoms(fn.replace(".pl", ".gold.interp"))
+        processed += options.chunk
+        
+        for fn, tim, goldAtoms, ret in p.map(_parPredict, [(myranker, fn) for fn in fns if None != fn]):
+            xmPredict = etree.Element("predict",
+                                      filename=fn,
+                                      time="%.2f" % tim,
+                                      goldAtoms=" ".join(goldAtoms),
+                                      numAnswers="%d" % len(ret),
+                                      result="0",
+                                      score="0",
+            )
+            xmRoot.append(xmPredict)
 
-        # Just predict!
-        ret = myranker.predict(aspfiles, eco=True)
-        times += [myranker.lastInferenceTime]
-
-        xmPredict = etree.Element("predict",
-                                  filename=fn,
-                                  time="%.2f" % myranker.lastInferenceTime,
-                                  goldAtoms=" ".join(goldAtoms),
-                                  numAnswers="%d" % len(ret),
-                                  result="0",
-                                  score="0",
-        )
-        xmRoot.append(xmPredict)
-
-        xmASS = etree.Element("answersets")
-        xmPredict.append(xmASS)
-
-        if 0 < len(ret):
-            numCorrect, numWrong = 0, 0
-            xmPredict.attrib["score"] = "%f" % ret[0].score
+            times += [tim]
             
-            for a in ret:
-                xmResult = etree.Element("answerset",
-                                         score="%f" % a.score,
-                                         result="0",
-                )
-                xmResult.text = "\n".join(a.answerset)
-                xmASS.append(xmResult)
+            xmASS = etree.Element("answersets")
+            xmPredict.append(xmASS)
 
-                if set(goldAtoms).issubset(set(a.answerset)):
-                    numCorrect += 1
-                else:
-                    numWrong += 1
+            if 0 < len(ret):
+                numCorrect, numWrong = 0, 0
+                xmPredict.attrib["score"] = "%f" % ret[0].score
 
-            if numCorrect > 0 and numWrong == 0:
-                xmResult.attrib["result"] = "1"
-                xmPredict.attrib["result"] = "1"
-                acc += 1
+                for a in ret:
+                    xmResult = etree.Element("answerset",
+                                             score="%f" % a.score,
+                                             result="0",
+                    )
+                    xmResult.text = "\n".join(a.answerset)
+                    xmASS.append(xmResult)
 
-            elif numCorrect == 0 and numWrong > 0:
-                xmResult.attrib["result"] = "-1"
-                xmPredict.attrib["result"] = "-1"
+                    if set(goldAtoms).issubset(set(a.answerset)):
+                        numCorrect += 1
+                    else:
+                        numWrong += 1
 
-            if numCorrect == 0 or numWrong == 0:
-                ranked += 1
+                if numCorrect > 0 and numWrong == 0:
+                    xmResult.attrib["result"] = "1"
+                    xmPredict.attrib["result"] = "1"
+                    acc += 1
+
+                elif numCorrect == 0 and numWrong > 0:
+                    xmResult.attrib["result"] = "-1"
+                    xmPredict.attrib["result"] = "-1"
+
+                if numCorrect == 0 or numWrong == 0:
+                    ranked += 1
 
 
     print >>sys.stderr, "Done."
@@ -137,6 +147,8 @@ def _writePerformance(acc, ranked, len_args, times):
 if "__main__" == __name__:
     cmdparser = optparse.OptionParser(description="INPACT interpreter.")
     cmdparser.add_option("--preamble", help="")
+    cmdparser.add_option("--parallel", type=int, default=1, help="The number of parallel processes.")
+    cmdparser.add_option("--chunk", type=int, default=50, help="Chunk size of parallel processing.")
     cmdparser.add_option("--model", help="")
     cmdparser.add_option("--use-epoch", type=int, default=-1, help="")
     cmdparser.add_option("--output", help="")

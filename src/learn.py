@@ -78,30 +78,17 @@ def _learn(xmRoot, options, args, myranker):
 
     p = multiprocessing.Pool(options.parallel)
     
-    for i in xrange(options.iter*2):
-        if i%2 == 0:
-            print >>sys.stderr, "Iteration:", 1+i/2
-            xmEpoch = etree.Element("epoch", id="%d" % (1+i/2))
-            xmRoot.append(xmEpoch)
+    for i in xrange(options.iter):
+        print >>sys.stderr, "Epoch:", 1+i
+        xmEpoch = etree.Element("epoch", id="%d" % (1+i))
+        xmRoot.append(xmEpoch)
 
-        ranked      = 0
-        tie         = 0
-        acc         = 0
         stat        = [0]*5
         loss, times = [], []
-        isUpdating  = i%2 == 1
-
-        if not isUpdating and not options.report_perf:
-            continue
-        
-        def _cb(a):
-            print >>sys.stderr, "HEY!", a[1]
-            return
-            
-        processed = 0
+        processed   = 0
         
         for fns in itertools.izip_longest(*[iter(args)]*options.chunk):
-            print >>sys.stderr, "\r", "[%4d/%4d] Processing..." % (processed, len(args))
+            print >>sys.stderr, "\r", "[%4d/%4d] Processing..." % (processed, len(args)),
             
             for status, myloss, examples in p.map(_parPredict, [(myranker, fn) for fn in fns if None != fn]):
                 if options.debug:
@@ -120,51 +107,32 @@ def _learn(xmRoot, options, args, myranker):
                     myranker.feed(ex[0], ex[1])
 
             processed += options.chunk
-            
                 
         print >>sys.stderr, "Done."
 
-        #
-        # Write the current status.
-        if isUpdating:
+        # Write the current loss.
+        xmLoss = _writeLoss(stat, loss)
+        xmEpoch.append(xmLoss)
 
-            # Write the current loss.
-            xmLoss = _writeLoss(stat, loss)
-            xmEpoch.append(xmLoss)
+        print >>sys.stderr, "loss =", xmLoss.attrib["loss"]
+        print >>sys.stderr, "Fitting...",
+        print >>sys.stderr, "# examples = %d (+:%d/-:%d)" % (
+            len(myranker.trainingExamples),
+            len(filter(lambda x: x==1, myranker.trainingLabels)),
+            len(filter(lambda x: x==-1, myranker.trainingLabels)),
+            )
 
-            print >>sys.stderr, "loss =", xmLoss.attrib["loss"]
-            print >>sys.stderr, "Fitting...",
-            print >>sys.stderr, "# examples = %d (+:%d/-:%d)" % (
-                len(myranker.trainingExamples),
-                len(filter(lambda x: x==1, myranker.trainingLabels)),
-                len(filter(lambda x: x==-1, myranker.trainingLabels)),
-                )
-                
 
-            isConverged = myranker.fit()
+        isConverged = myranker.fit()
 
-            # Write the current vector.
-            xmEpoch.append(_writeWeightVector(myranker.dv.inverse_transform(myranker.coef_)[0]))
+        # Write the current vector.
+        xmEpoch.append(_writeWeightVector(myranker.dv.inverse_transform(myranker.coef_)[0]))
 
-            if isConverged:
-                print >>sys.stderr, "Converged."
-                break
+        if isConverged:
+            print >>sys.stderr, "Converged."
+            break
 
-            print >>sys.stderr, "Ok."
-
-        else:
-
-            # Write the current accuracy.
-            xmAccuracy = _writePerformance(acc, tie, ranked, len(args), times)
-            xmEpoch.append(xmAccuracy)
-
-            print >>sys.stderr, \
-                "acc.  =", xmAccuracy.attrib["accuracy"], \
-                "prec. =", xmAccuracy.attrib["prec"], \
-                "tie   =", xmAccuracy.attrib["tie"], \
-                "correct =", xmAccuracy.attrib["correct"], \
-                "ranked =", xmAccuracy.attrib["ranked"]
-
+        print >>sys.stderr, "Ok."
             
 
 def _writeLoss(stat, loss):
@@ -177,22 +145,13 @@ def _writeLoss(stat, loss):
                            loss="%.2f" % (sum(loss))
     )
 
-def _writePerformance(acc, tie, ranked, len_args, times):
-    return etree.Element("performance",
-                         accuracy="%.1f" % (100.0*acc/len_args),
-                         prec="%.1f" % (100.0*acc/ranked),
-                         correct="%d" % acc,
-                         tie="%d" % tie,
-                         ranked="%d" % ranked,
-                         total="%d" % len_args,
-                         time="%.2f" % (sum(times) / len(times)),
-                     )
-
+    
 def _writeWeightVector(v):
     e = etree.Element("weight")
     e.text = repr(v)
     return e
 
+    
 def _writeParams(options):
     xmParams     = etree.Element("params")
     dictoptions = sorted(vars(options).iteritems(), key=lambda x: x[0])
@@ -232,7 +191,6 @@ if "__main__" == __name__:
     cmdparser.add_option("--eta", type=float, default=0.1)
     cmdparser.add_option("--no-rescaling", action="store_true")
     cmdparser.add_option("--no-normalization", action="store_true")
-    cmdparser.add_option("--report-perf", action="store_true")
     cmdparser.add_option("--epsilon", type=float, default=0.001, help="The number of iterations.")
     cmdparser.add_option("--debug", action="store_true")
 
