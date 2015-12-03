@@ -12,6 +12,7 @@ import ono_svoselpref
 import selpref
 import ncnaive
 import googlengram
+import sentimentpolarity
 
 
 def _getNumber(l):
@@ -40,6 +41,12 @@ class parser_t:
             "/work/naoya-i/kb/ncnaive0909.0.cdb",
             "/work/naoya-i/kb/tuples.0909.tuples.cdb")
         self.gn = googlengram.googlengram_t("/work/jun-s/kb/ngrams")
+        self.senti = sentimentpolarity.sentimentpolarity_t(
+            fn_wilson05="/home/naoya-i/data/dict/subjclueslen1-HLTEMNLP05.tff",
+            fn_sentiwordnet="/home/naoya-i/data/dict/SentiWordNet_3.0.0_20130122.txt",
+            fn_warriner13="/home/naoya-i/data/dict/Ratings_Warriner_et_al.csv",
+            fn_takamura05="/home/naoya-i/data/dict/pn_en.dic",
+            )
 
         
     def collectOntological(self, sent):
