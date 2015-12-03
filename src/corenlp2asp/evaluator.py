@@ -2,7 +2,7 @@
 import sys
 sys.path += [".."]
 
-from features import gender, sentimentpolarity
+from features import gender, sentimentpolarity, selpref, ncnaive
 
 
 class evaluator_t:
@@ -16,6 +16,10 @@ class evaluator_t:
             fn_warriner13="/home/naoya-i/data/dict/Ratings_Warriner_et_al.csv",
             fn_takamura05="/home/naoya-i/data/dict/pn_en.dic",
         )
+        self.sp = selpref.selpref_t(pathKB="/work/naoya-i/kb")
+        self.nc = ncnaive.ncnaive_t(
+            "/work/naoya-i/kb/ncnaive0909.0.cdb",
+            "/work/naoya-i/kb/tuples.0909.tuples.cdb")
 
         print >>sys.stderr, "Done."
         
@@ -58,6 +62,29 @@ class evaluator_t:
 
         
     def _xfSlotSenti(self, tk, slot):
-        return "A"
+        return "unknown"
+
         
+    def _wfSelpref(self, n, p, vp, t):
+        t = t.replace("nsubjpass", "nsubj_pass").replace("nmod:", "prep_")
+        
+        sps = self.sp.calc("%s-%s" % (self.doc.tokens[vp].lemma, self.doc.tokens[vp].pos[0].lower()),
+                           t,
+                           "%s-%s-%s" % (self.doc.tokens[n].lemma, self.doc.tokens[n].pos[0].lower(), self.doc.tokens[n].ne),
+                           )
+        return sps[0]
+
+        
+    def _wfESA(self, n, p, vn, tn, vp, tp):
+        tn = tn.replace("nmod:", "prep_")
+        tp = tp.replace("nmod:", "prep_")
+        
+        e1, e2 = "%s-%s:%s" % (self.doc.tokens[vp].lemma, self.doc.tokens[vp].pos[0].lower(), tp), \
+                 "%s-%s:%s" % (self.doc.tokens[vn].lemma, self.doc.tokens[vn].pos[0].lower(), tn)
+
+        if e1 > e2: e1, e2 = e2, e1
+
+        ncs = self.nc.getPMI(e1, e2)
+        
+        return ncs
         

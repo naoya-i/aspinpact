@@ -109,7 +109,6 @@ def _interpret(xmRoot, options, args, myranker):
             if numCorrect == 0 or numWrong == 0:
                 ranked += 1
 
-                
 
     print >>sys.stderr, "Done."
 

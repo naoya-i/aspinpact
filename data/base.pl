@@ -23,6 +23,7 @@ isVerb(X)  :- token(X, _, _, "VBZ", _).
 isPronoun(X) :- token(X, _, _, "PRP", _).
 isPronoun(X) :- token(X, _, _, "PRP$", _).
 
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Mention.
 
@@ -38,7 +39,7 @@ gender(I, xfGender(I)) :- pronoun(I).
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Modifiers.
 
-% He is cute, cool guy.
+% He is cute. A cool guy.
 modify(J, N) :- isAdj(J), dep("nsubj", J, N).
 modify(J, N) :- isAdj(J), dep("amod", N, J).
 
@@ -49,11 +50,11 @@ modify(J, N) :- isAdj(J), dep("xcomp", V, J), dep("nsubj", V, N).
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % ISA.
 
-% He wants to be a friend. (nsubj(want, he) + xcomp(want, friend))
-isa(X, Xi) :- dep("nsubj", V, X), dep("xcomp", V, Xi).
-
 % He is a player. (nsubj(player, he))
 isa(X, Xi) :- dep("nsubj", Xi, X), isNoun(Xi).
+
+% He wants to be a friend. (nsubj(want, he) + xcomp(want, friend))
+isa(X, Xi) :- dep("nsubj", V, X), dep("xcomp", V, Xi).
 
 % He is perceived as a good artist. (nsubjpass(perceived, he) + nmod:as(perceived, artist))
 isa(X, Xi) :- dep("nsubjpass", V, X), dep("nmod:as", V, Xi), isNoun(Xi).
@@ -62,16 +63,16 @@ isa(X, Xi) :- dep("nsubjpass", V, X), dep("nmod:as", V, Xi), isNoun(Xi).
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Sentiment propagator.
 
-entitySentiment(X, S) :- modify(J, X), senti(J, S).
-entitySentiment(X, S) :- isa(X, Xi), entitySentiment(Xi, S).
-entityEventSlotSentiment(X, S) :- isVerb(V), dep(T, V, X), slotSenti(V, T, S).
+entitySentimentByModifier(X, S) :- modify(J, X), senti(J, S).
+entitySentimentByModifier(X, S) :- isa(X, Xi), entitySentiment(Xi, S).
+entitySentimentByEventSlot(X, S) :- isVerb(V), dep(T, V, X), slotSenti(V, T, S).
 
 senti(I, xfSenti(I)) :- token(I, _, _, _, _).
 slotSenti(V, T, xfSlotSenti(V, T)) :- token(V, _, _, _, _), dep(T, V, _).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Display.
+% Output configuration.
 
 #show.
 
@@ -83,5 +84,5 @@ slotSenti(V, T, xfSlotSenti(V, T)) :- token(V, _, _, _, _), dep(T, V, _).
 
 #show number/2.
 #show gender/2.
-#show entitySentiment/2.
-#show entityEventSlotSentiment/2.
+#show entitySentimentByModifier/2.
+#show entitySentimentByEventSlot/2.

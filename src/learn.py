@@ -6,6 +6,7 @@ import csv
 import optparse
 import collections
 import itertools
+import multiprocessing
 
 import numpy as np
 import scipy.sparse as ss
@@ -63,11 +64,20 @@ def _output(out, xmRoot):
     print >>fsOut, etree.tostring(xmRoot, pretty_print=True)
 
 
+def _parPredict(args):
+    myranker, lp = args
+    goldAtoms    = readGoldAtoms(lp.replace(".pl", ".gold.interp"))
+    
+    return myranker.feed([lp], goldAtoms, poke=True)
+
+    
 def _learn(xmRoot, options, args, myranker):
     xmRoot.append(_writeParams(options))
 
     isConverged = False
 
+    p = multiprocessing.Pool(2)
+    
     for i in xrange(options.iter*2):
         if i%2 == 0:
             print >>sys.stderr, "Iteration:", 1+i/2
@@ -84,48 +94,52 @@ def _learn(xmRoot, options, args, myranker):
         if not isUpdating and not options.report_perf:
             continue
 
-        for j, fn in enumerate(args):
-            print >>sys.stderr, "\r", "[%4d/%4d] Processing %s..." % (1+j, len(args), fn),
+        for exs in p.map(_parPredict, [(myranker, fn) for fn in args]):
+            for e in exs:
+                myranker._addTrainingDatum(e[0], e[1])
+        
+        # for j, fn in enumerate(args):
+        #     print >>sys.stderr, "\r", "[%4d/%4d] Processing %s..." % (1+j, len(args), fn),
 
-            aspfiles  = [options.preamble, fn] if options.preamble != None else [fn]
-            goldAtoms = readGoldAtoms(fn.replace(".pl", ".gold.interp"))
+        #     aspfiles  = [options.preamble, fn] if options.preamble != None else [fn]
+        #     goldAtoms = readGoldAtoms(fn.replace(".pl", ".gold.interp"))
 
-            if isUpdating:
+        #     if isUpdating:
 
-                # Feed the example to the learner.
-                ret, myloss = myranker.feed(aspfiles, goldAtoms)
+        #         # Feed the example to the learner.
+        #         ret, myloss = myranker.feed(aspfiles, goldAtoms)
 
-                if options.debug:
-                    xmProblemwise = etree.Element("problemwise",
-                                                  statusCode="%d" % ret,
-                                                  loss="%.2f" % myloss,
-                                                  time="%.2f" % myranker.lastInferenceTime,
-                                                  filename=fn,
-                    )
-                    xmEpoch.append(xmProblemwise)
-                    # xmProblemwise.text = "%s\n%s" % (
-                    #     " ".join(myranker.lastPosi.answerset),
-                    #     " ".join(myranker.lastNega.answerset),
-                    #     )
+        #         if options.debug:
+        #             xmProblemwise = etree.Element("problemwise",
+        #                                           statusCode="%d" % ret,
+        #                                           loss="%.2f" % myloss,
+        #                                           time="%.2f" % myranker.lastInferenceTime,
+        #                                           filename=fn,
+        #             )
+        #             xmEpoch.append(xmProblemwise)
+        #             # xmProblemwise.text = "%s\n%s" % (
+        #             #     " ".join(myranker.lastPosi.answerset),
+        #             #     " ".join(myranker.lastNega.answerset),
+        #             #     )
 
-                stat[ret] += 1
-                loss += [myloss]
+        #         stat[ret] += 1
+        #         loss += [myloss]
 
-            else:
-                # Just predict!
-                correctPredictions = myranker.predict(aspfiles, goldAtoms, exclude=False)
-                wrongPredictions = myranker.predict(aspfiles, goldAtoms, exclude=True)
+        #     else:
+        #         # Just predict!
+        #         correctPredictions = myranker.predict(aspfiles, goldAtoms, exclude=False)
+        #         wrongPredictions = myranker.predict(aspfiles, goldAtoms, exclude=True)
 
-                times += [myranker.lastInferenceTime]
+        #         times += [myranker.lastInferenceTime]
 
-                if 0 < len(correctPredictions) and 0 < len(wrongPredictions):
-                    ranked += 1
+        #         if 0 < len(correctPredictions) and 0 < len(wrongPredictions):
+        #             ranked += 1
 
-                    if correctPredictions[0].score == wrongPredictions[0].score:
-                        tie += 1
+        #             if correctPredictions[0].score == wrongPredictions[0].score:
+        #                 tie += 1
 
-                    elif correctPredictions[0].score > wrongPredictions[0].score:
-                        acc += 1
+        #             elif correctPredictions[0].score > wrongPredictions[0].score:
+        #                 acc += 1
 
         print >>sys.stderr, "Done."
 

@@ -155,7 +155,10 @@ class answerset_ranker_t:
         return self.normalize(vec)
 
 
-    def predict(self, lpfiles, goldAtoms=[], weight=None, lossAugmented=False, exclude=False, enum=False, eco=False, maximize=True):
+    def predict(self, lpfiles, goldAtoms=[], weight=None, lossAugmented=False,
+                exclude=False, enum=False, eco=False, maximize=True, generationOnly=False):
+        assert(isinstance(lpfiles, list))
+        
         regexWeakConstraint = re.compile("^:~(.*?)\[f_(.*?)\(([-0-9.e]+)\)@(.*?)\]")
 
         if weight is None:
@@ -189,13 +192,13 @@ class answerset_ranker_t:
 
                     if not eco:
                         print >>tmpf, "f_%s(%s, %s) :- %s" % (fname, _sanitize(fvalue), binder, constraint)
-                        print >>tmpf, ":~ f_%s(%s, %s). [%d@1, %s, %s]" % (
+                        print >>tmpf, ":~ f_%s(%s, %s). [%d@1, f_%s, %s]" % (
                             fname, _sanitize(fvalue), binder,
                             int(-RESOLUTION*weight[fidx]*fvalue), fname, binder)
 
                     else:
                         # If we do not have to recover the feature vector, then.
-                        print >>tmpf, ":~ %s [%d@1, %s, %s]" % (
+                        print >>tmpf, ":~ %s [%d@1, f_%s, %s]" % (
                             constraint,
                             int(-RESOLUTION*weight[fidx]*fvalue), fname, binder)
 
@@ -212,6 +215,13 @@ class answerset_ranker_t:
                 if exclude: print >>tmpf, ":- correct."
                 else:       print >>tmpf, ":- not correct."
 
+        print >>tmpf, "dummy_always_ensures_optimization."
+        print >>tmpf, ":~ dummy_always_ensures_optimization. [0@1]"
+
+        if generationOnly:
+            print tmpf.getvalue()
+            return []
+        
         # Use clingo to get the prediction. The constructed ASP is given by a standard input.
         pClingo = subprocess.Popen(
             ["/home/naoya-i/tmp/clingo-4.5.3-linux-x86_64/clingo",
@@ -223,7 +233,7 @@ class answerset_ranker_t:
         )
         pClingo.stdin.write(tmpf.getvalue())
         pClingo.stdin.close()
-
+        
         clingoret = pClingo.stdout.read()
         clingoerr = pClingo.stderr.read()
 
@@ -282,20 +292,30 @@ class answerset_ranker_t:
         self.trainingHash[h] = None
         
         
-    def feed(self, aspfiles, goldAtoms):
+    def feed(self, aspfiles, goldAtoms, poke=False):
 
         if self.algo in ["batch", "iterative"]:
             _enum  = self.algo == "batch"
             sp, sn = -99999, -99999
-
+            ret    = []
+            
             if self.pairwise:
                 for posi in self.predict(aspfiles, goldAtoms, exclude=False, maximize=True, enum=_enum):
                     for nega in self.predict(aspfiles, goldAtoms, exclude=True,  maximize=True, enum=_enum):
-                        self._addTrainingDatum(self.getFeatureVector(posi.answerset).toarray()[0] - self.getFeatureVector(nega.answerset).toarray()[0], 1)
-                        self._addTrainingDatum(self.getFeatureVector(nega.answerset).toarray()[0] - self.getFeatureVector(posi.answerset).toarray()[0], -1)
+                        if poke:
+                            ret += [(self.getFeatureVector(posi.answerset).toarray()[0] - self.getFeatureVector(nega.answerset).toarray()[0], 1)]
+                            ret += [(self.getFeatureVector(nega.answerset).toarray()[0] - self.getFeatureVector(posi.answerset).toarray()[0], -1)]
+
+                        else:
+                            self._addTrainingDatum(self.getFeatureVector(posi.answerset).toarray()[0] - self.getFeatureVector(nega.answerset).toarray()[0], 1)
+                            self._addTrainingDatum(self.getFeatureVector(nega.answerset).toarray()[0] - self.getFeatureVector(posi.answerset).toarray()[0], -1)
+                            
                         sp = max(sp, posi.score)
                         sn = max(sn, nega.score)
 
+                return ret
+
+                
             else:
                 for posi in self.predict(aspfiles, goldAtoms, exclude=False, maximize=True, enum=_enum):
                     self._addTrainingDatum(self.getFeatureVector(posi.answerset).toarray()[0], 1)
