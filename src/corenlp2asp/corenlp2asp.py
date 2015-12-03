@@ -18,21 +18,24 @@ def _sanitize(l):
 
 class parser_t:
     def __init__(self):
-        pass
-
+        self.ev = evaluator.evaluator_t()
+        
 
     def parse(self, fn):
         xml   = etree.parse(fn)
         atoms = []
         
         for sent in xml.xpath("/root/document/sentences/sentence"):
-            ev  = evaluator.evaluator_t(sdreader.createDocFromLXML(sent))
+            self.ev.setDoc(sdreader.createDocFromLXML(sent))
 
-            atoms += self.pl2pl(
-                self.xml2pl(sent)
+            atoms += self.evalXfs(
+                self.pl2pl(
+                    self.xml2pl(sent)
+                ),
+                self.ev
             )
 
-        return self.evalXfs(atoms, ev)
+        return atoms
 
 
     def evalXfs(self, pl, ev):

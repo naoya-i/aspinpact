@@ -45,7 +45,7 @@ modify(J, N) :- isAdj(J), dep("amod", N, J).
 % He looks sad. (xcomp(look, sad) + nsubj(look, he))
 modify(J, N) :- isAdj(J), dep("xcomp", V, J), dep("nsubj", V, N).
 
-
+    
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % ISA.
 
@@ -54,6 +54,9 @@ isa(X, Xi) :- dep("nsubj", V, X), dep("xcomp", V, Xi).
 
 % He is a player. (nsubj(player, he))
 isa(X, Xi) :- dep("nsubj", Xi, X), isNoun(Xi).
+
+% He is perceived as a good artist. (nsubjpass(perceived, he) + nmod:as(perceived, artist))
+isa(X, Xi) :- dep("nsubjpass", V, X), dep("nmod:as", V, Xi), isNoun(Xi).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%

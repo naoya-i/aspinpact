@@ -74,12 +74,19 @@ class sentimentpolarity_t:
 
             self.takam[word] = float(score)
             
+
+    def getAvgPolarity(self, word):
+        return (self.getPolarity(word, self.wi05, de=0.0) + \
+            self.getPolarity(word+"#1", self.swn, de=0.0) + \
+            self.getPolarity(word, self.warriner, de=0.0) + \
+            self.getPolarity(word, self.takam, de=0.0)) / 4.0
+        
             
-    def getPolarity(self, word, dic):
+    def getPolarity(self, word, dic, de=None):
         pol = dic.get(word)
 
         if None == pol:
-            return None
+            return de
         
         return pol
 
