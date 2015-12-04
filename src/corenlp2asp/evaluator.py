@@ -2,7 +2,7 @@
 import sys
 sys.path += [".."]
 
-from features import gender, sentimentpolarity, selpref, ncnaive
+from features import gender, sentimentpolarity, selpref, ncnaive, sentieventslot
 
 
 class evaluator_t:
@@ -20,6 +20,9 @@ class evaluator_t:
         self.nc = ncnaive.ncnaive_t(
             "/work/naoya-i/kb/ncnaive0909.0.cdb",
             "/work/naoya-i/kb/tuples.0909.tuples.cdb")
+        self.ses = sentieventslot.sentieventslot_t(
+                fn="/home/naoya-i/data/dict/ses.tsv"
+            )
 
         print >>sys.stderr, "Done."
         
@@ -62,7 +65,8 @@ class evaluator_t:
 
         
     def _xfSlotSenti(self, tk, slot):
-        return "unknown"
+        tk = self.doc.tokens[tk]
+        return "neutral" #  self.ses.calc("%s-%s" % (tk.lemma, tk.pos[0].lower()), slot)
 
         
     def _wfSelpref(self, n, p, vp, t):

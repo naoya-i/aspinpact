@@ -47,9 +47,9 @@ def _parPredict(args):
     myranker, lp = args
     goldAtoms    = readGoldAtoms(lp.replace(".pl", ".gold.interp"))
     a            = myranker.predict([lp], eco=True)
-    
+
     return lp, myranker.lastInferenceTime, goldAtoms, a
-    
+
 
 def _output(out, xmRoot):
     fsOut = sys.stdout
@@ -68,12 +68,12 @@ def _interpret(xmRoot, options, args, myranker):
     processed = 0
 
     p = multiprocessing.Pool(options.parallel)
-    
+
     for fns in itertools.izip_longest(*[iter(args)]*options.chunk):
         print >>sys.stderr, "\r", "[%4d/%4d] Processing..." % (processed, len(args)),
 
         processed += options.chunk
-        
+
         for fn, tim, goldAtoms, ret in p.map(_parPredict, [(myranker, fn) for fn in fns if None != fn]):
             xmPredict = etree.Element("predict",
                                       filename=fn,
@@ -86,7 +86,7 @@ def _interpret(xmRoot, options, args, myranker):
             xmRoot.append(xmPredict)
 
             times += [tim]
-            
+
             xmASS = etree.Element("answersets")
             xmPredict.append(xmASS)
 

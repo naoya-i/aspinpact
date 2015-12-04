@@ -10,6 +10,7 @@ import cStringIO
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score
+from sklearn import cross_validation
 
 from extractBestAnswerSet import *
 from scipy.sparse import dok_matrix, csr_matrix
@@ -256,21 +257,16 @@ class answerset_ranker_t:
             self.nPrevTrainingEx = len(self.trainingExamples)
                 
             m = LinearSVC(C=self.C, max_iter=100000, fit_intercept=True, verbose=True)
+
+            cvs = cross_validation.cross_val_score(m, self.trainingExamples, self.trainingLabels, cv=5)
+            print >>sys.stderr, "CV:", sum(cvs) / len(cvs)
+            
             m.fit(self.trainingExamples, self.trainingLabels)
             self.coef_ = m.coef_[0]
             self.m = m
 
             print >>sys.stderr, "Closed discriminative power (acc.):", accuracy_score(self.trainingLabels, m.predict(self.trainingExamples))
-            
-            # print >>sys.stderr, self.coef_
-            # print >>sys.stderr, self.trainingExamples[0]
-            # print >>sys.stderr, m.decision_function(self.trainingExamples)
-            # print >>sys.stderr, m.predict(self.trainingExamples)
-            # print >>sys.stderr, self.trainingLabels
-            # print >>sys.stderr, self.trainingExamples[1]
-            # print >>sys.stderr, m.decision_function(self.trainingExamples[1])
-            # print >>sys.stderr, m.decision_function(self.trainingExamples[0])[0] - m.decision_function(self.trainingExamples[1])[0]
-
+                                             
             if "batch" == self.algo:
                 return True
             
