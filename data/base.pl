@@ -38,6 +38,7 @@ gender(I, xfGender(I)) :- pronoun(I).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Modifiers.
+negated(X) :- dep("neg", X, _).
 
 % He is cute. A cool guy.
 modify(J, N) :- isAdj(J), dep("nsubj", J, N).
@@ -46,7 +47,7 @@ modify(J, N) :- isAdj(J), dep("amod", N, J).
 % He looks sad. (xcomp(look, sad) + nsubj(look, he))
 modify(J, N) :- isAdj(J), dep("xcomp", V, J), dep("nsubj", V, N).
 
-    
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % ISA.
 
@@ -62,9 +63,12 @@ isa(X, Xi) :- dep("nsubjpass", V, X), dep("nmod:as", V, Xi), isNoun(Xi).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Sentiment propagator.
+entitySentimentByModifier(X, S) :- modify(J, X), not negated(J), senti(J, S).
+entitySentimentByModifier(X, xfInvSenti(S)) :- modify(J, X), negated(J), senti(J, S).
 
-entitySentimentByModifier(X, S) :- modify(J, X), senti(J, S).
-entitySentimentByModifier(X, S) :- isa(X, Xi), entitySentiment(Xi, S).
+entitySentimentByModifier(X, S) :- isa(X, Xi), not negated(Xi), entitySentimentByModifier(Xi, S).
+entitySentimentByModifier(X, xfInvSenti(S)) :- isa(X, Xi), negated(Xi), entitySentimentByModifier(Xi, S).
+
 entitySentimentByEventSlot(X, S) :- isVerb(V), dep(T, V, X), slotSenti(V, T, S).
 
 senti(I, xfSenti(I)) :- token(I, _, _, _, _).

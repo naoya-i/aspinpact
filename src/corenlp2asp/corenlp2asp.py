@@ -9,6 +9,10 @@ import cStringIO
 import subprocess
 import re
 
+import multiprocessing
+import optparse
+import itertools
+
 import evaluator
 
 from lxml import etree
@@ -117,19 +121,31 @@ class parser_t:
 
     def evalXfs(self, pl, ev):
 
-        def _eval(m):
-            fname, fargs = m.groups()
-            fargs        = fargs.strip("()")
-
+        def _eval(fname, fargs):
             if hasattr(ev, "_xf%s" % fname):
-                return getattr(ev, "_xf%s" % fname)(*[eval(a) for a in fargs.split(",")])
+                return getattr(ev, "_xf%s" % fname)(*[int(a) if re.match("[-0-9]+", a) else a.strip("\"") for a in fargs.split(",")])
 
             return "%s_is_unknown_xf" % fname
 
 
-        return [re.sub("xf([A-Za-z0-9_]+)\(([^)]+)\)",
-                       _eval, a)
-                for a in pl]
+        # Ok, recursively replace the external functions.
+        new_pl = []
+
+        for a in pl:
+            while True:
+                toReplaces = re.findall("xf([A-Za-z0-9_]+)\(([^()]+)\)", a)
+
+                if 0 == len(toReplaces): break
+
+                for fname, fargs in toReplaces:
+                    a = a.replace(
+                        "xf%s(%s)" % (fname, fargs),
+                        _eval(fname, fargs))
+                    print >>sys.stderr, fname, fargs, a
+
+            new_pl += [a]
+
+        return new_pl
 
 
     def pl2pl(self, pl):
@@ -187,17 +203,15 @@ class parser_t:
 
 def _convert(fn):
     with open(fn.replace(".txt.corenlp.xml", ".pl"), "w") as out:
-        print >>out, parser.parse(fn)
+        print >>out, g_parser.parse(fn)
 
 
 def main(options, args):
-    parser = parser_t()
-
     p = multiprocessing.Pool(options.parallel)
     processed = 0
 
-    for fns in itertools.izip_longest(*[iter(sys.argv[1:])]*options.chunk):
-        print >>sys.stderr, "\r", "[%4d/%4d] Processing..." % (processed, len(sys.argv[1:])),
+    for fns in itertools.izip_longest(*[iter(args)]*options.chunk):
+        print >>sys.stderr, "\r", "[%4d/%4d] Processing..." % (processed, len(args)),
 
         processed += options.chunk
         p.map(_convert, [fn for fn in fns if None != fn])
@@ -209,5 +223,7 @@ if "__main__" == __name__:
     cmdparser = optparse.OptionParser(description="Weight Learner for ASP.")
     cmdparser.add_option("--parallel", type=int, default=8, help="The number of parallel processes.")
     cmdparser.add_option("--chunk", type=int, default=50, help="Chunk size of parallel processing.")
+
+    g_parser = parser_t()
 
     main(*cmdparser.parse_args())

@@ -18,13 +18,16 @@ from extractBestAnswerSet import *
 
 def main(options, args):
     myranker = answerset_ranker_t(
-        rescaling=not options.no_rescaling,
-        normalization=not options.no_normalization,
+        rescaling=options.rescaling,
+        normalization=options.normalization,
         C=options.C,
         eta=options.eta,
         epsilon=options.epsilon,
         pairwise=options.pairwise,
-        alg=options.algo)
+        alg=options.algo,
+        report_cv=options.report_cv,
+        ignore_features=options.ignore_features,
+        )
 
     # Collect all possible features
     print >>sys.stderr, "Collecting feature information..."
@@ -67,17 +70,17 @@ def _output(out, xmRoot):
 def _parPredict(args):
     myranker, lp = args
     goldAtoms    = readGoldAtoms(lp.replace(".pl", ".gold.interp"))
-    
+
     return myranker.poke([lp], goldAtoms)
 
-    
+
 def _learn(xmRoot, options, args, myranker):
     xmRoot.append(_writeParams(options))
 
     isConverged = False
 
     p = multiprocessing.Pool(options.parallel)
-    
+
     for i in xrange(options.iter):
         print >>sys.stderr, "Epoch:", 1+i
         xmEpoch = etree.Element("epoch", id="%d" % (1+i))
@@ -86,10 +89,10 @@ def _learn(xmRoot, options, args, myranker):
         stat        = [0]*5
         loss, times = [], []
         processed   = 0
-        
+
         for fns in itertools.izip_longest(*[iter(args)]*options.chunk):
             print >>sys.stderr, "\r", "[%4d/%4d] Processing..." % (processed, len(args)),
-            
+
             for status, myloss, examples in p.map(_parPredict, [(myranker, fn) for fn in fns if None != fn]):
                 if options.debug:
                     xmProblemwise = etree.Element("problemwise",
@@ -107,7 +110,7 @@ def _learn(xmRoot, options, args, myranker):
                     myranker.feed(ex[0], ex[1])
 
             processed += options.chunk
-                
+
         print >>sys.stderr, "Done."
 
         # Write the current loss.
@@ -122,7 +125,6 @@ def _learn(xmRoot, options, args, myranker):
             len(filter(lambda x: x==-1, myranker.trainingLabels)),
             )
 
-
         isConverged = myranker.fit()
 
         # Write the current vector.
@@ -133,7 +135,7 @@ def _learn(xmRoot, options, args, myranker):
             break
 
         print >>sys.stderr, "Ok."
-            
+
 
 def _writeLoss(stat, loss):
     return etree.Element("loss",
@@ -145,13 +147,13 @@ def _writeLoss(stat, loss):
                            loss="%.2f" % (sum(loss))
     )
 
-    
+
 def _writeWeightVector(v):
     e = etree.Element("weight")
     e.text = repr(v)
     return e
 
-    
+
 def _writeParams(options):
     xmParams     = etree.Element("params")
     dictoptions = sorted(vars(options).iteritems(), key=lambda x: x[0])
@@ -161,7 +163,7 @@ def _writeParams(options):
 
     def _tostr(k, v):
         k = k.replace("_", "-")
-        
+
         if isinstance(v, bool):
             if v:
                 return "--%s" % k
@@ -182,16 +184,18 @@ if "__main__" == __name__:
     cmdparser = optparse.OptionParser(description="Weight Learner for ASP.")
     cmdparser.add_option("--preamble", help="")
     cmdparser.add_option("--output", help="")
-    cmdparser.add_option("--pairwise", action="store_true", help="")
+    cmdparser.add_option("--pairwise", action="store_true", default=False, help="")
     cmdparser.add_option("--algo", default="latperc", help="")
     cmdparser.add_option("--parallel", type=int, default=1, help="The number of parallel processes.")
     cmdparser.add_option("--chunk", type=int, default=50, help="Chunk size of parallel processing.")
     cmdparser.add_option("--iter", type=int, default=5, help="The number of iterations.")
+    cmdparser.add_option("--ignore-features")
     cmdparser.add_option("--C", type=float, default=0.01)
     cmdparser.add_option("--eta", type=float, default=0.1)
-    cmdparser.add_option("--no-rescaling", action="store_true")
-    cmdparser.add_option("--no-normalization", action="store_true")
+    cmdparser.add_option("--report-cv", action="store_true", default=False)
+    cmdparser.add_option("--rescaling", action="store_true", default=False)
+    cmdparser.add_option("--normalization", action="store_true", default=False)
     cmdparser.add_option("--epsilon", type=float, default=0.001, help="The number of iterations.")
-    cmdparser.add_option("--debug", action="store_true")
+    cmdparser.add_option("--debug", action="store_true", default=False)
 
     main(*cmdparser.parse_args())

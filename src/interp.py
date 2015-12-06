@@ -17,10 +17,7 @@ from ranker import *
 from extractBestAnswerSet import *
 
 def main(options, args):
-    myranker = answerset_ranker_t(
-        rescaling=True,
-        normalization=True,
-        )
+    myranker = answerset_ranker_t()
 
     print >>sys.stderr, "Loading %s..." % options.model
     myranker.load(options.model, options.use_epoch)

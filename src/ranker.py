@@ -40,7 +40,7 @@ class answerset_ranker_t:
 
     def __init__(self, eta=0.01, C = 0.0001, epsilon=0.01,
                  alg="latperc", rescaling=True, normalization=True,
-                 pairwise=False,
+                 pairwise=False, report_cv=False, ignore_features=None,
     ):
         self.dv = DictVectorizer()
         self.coef_ = None
@@ -61,6 +61,12 @@ class answerset_ranker_t:
         self.trainingHash = {}
         self.nPrevTrainingEx = 0
         self.pairwise = pairwise
+        self.report_cv = report_cv
+
+        if None != ignore_features:
+            self.ignore_features = re.compile(ignore_features)
+        else:
+            self.ignore_features = None
 
 
     def load(self, xml, epoch = -1):
@@ -69,7 +75,7 @@ class answerset_ranker_t:
         r = x.xpath("/root/ranker")[0]
         w = x.xpath("/root/ranker/weight/text()")[0] if -1 == epoch else x.xpath("/root/epoch/weight/text()")[epoch]
         m = x.xpath("/root/ranker/minmax/text()")[0]
-        
+
         self.normalization = eval(r.attrib["normalization"])
         self.rescaling = eval(r.attrib["rescaling"])
         self.features = eval(w)
@@ -97,10 +103,11 @@ class answerset_ranker_t:
 
     def setupFeatures(self):
         self.dv.fit([self.features])
+        dvfns = self.dv.get_feature_names()
         self.coef_ = np.array([0.0]*len(self.features.keys()))
 
         for i in xrange(self.coef_.shape[0]):
-            self.coef_[i] = self.weightInitializer(i)
+            self.coef_[i] = 1 # self.weightInitializer(i)
 
         self.coef_avg_ += [self.coef_.copy()]
 
@@ -159,7 +166,7 @@ class answerset_ranker_t:
     def predict(self, lpfiles, goldAtoms=[], weight=None, lossAugmented=False,
                 exclude=False, enum=False, eco=False, maximize=True, generationOnly=False):
         assert(isinstance(lpfiles, list))
-        
+
         regexWeakConstraint = re.compile("^:~(.*?)\[f_(.*?)\(([-0-9.e]+)\)@(.*?)\]")
 
         if weight is None:
@@ -182,7 +189,9 @@ class answerset_ranker_t:
                                                     float(m.group(3).strip()), \
                                                     ",".join(m.group(4).split(",")[1:]).strip()
 
-                if not self.dv.vocabulary_.has_key(fname):
+                if not self.dv.vocabulary_.has_key(fname) or \
+                    (None != self.ignore_features and None != self.ignore_features.search(fname)):
+
                     print >>tmpf, "%% LOST: %s" % (ln.strip())
 
                 else:
@@ -222,7 +231,7 @@ class answerset_ranker_t:
         if generationOnly:
             print tmpf.getvalue()
             return []
-        
+
         # Use clingo to get the prediction. The constructed ASP is given by a standard input.
         pClingo = subprocess.Popen(
             ["/home/naoya-i/tmp/clingo-4.5.3-linux-x86_64/clingo",
@@ -234,7 +243,7 @@ class answerset_ranker_t:
         )
         pClingo.stdin.write(tmpf.getvalue())
         pClingo.stdin.close()
-        
+
         clingoret = pClingo.stdout.read()
         clingoerr = pClingo.stderr.read()
 
@@ -255,23 +264,24 @@ class answerset_ranker_t:
                 return True
 
             self.nPrevTrainingEx = len(self.trainingExamples)
-                
+
             m = LinearSVC(C=self.C, max_iter=100000, fit_intercept=True, verbose=True)
 
-            cvs = cross_validation.cross_val_score(m, self.trainingExamples, self.trainingLabels, cv=5)
-            print >>sys.stderr, "CV:", sum(cvs) / len(cvs)
-            
+            if self.report_cv:
+                cvs = cross_validation.cross_val_score(m, self.trainingExamples, self.trainingLabels, cv=5)
+                print >>sys.stderr, "CV:", sum(cvs) / len(cvs)
+
             m.fit(self.trainingExamples, self.trainingLabels)
             self.coef_ = m.coef_[0]
             self.m = m
 
             print >>sys.stderr, "Closed discriminative power (acc.):", accuracy_score(self.trainingLabels, m.predict(self.trainingExamples))
-                                             
+
             if "batch" == self.algo:
                 return True
-            
+
             return False
-            
+
         self.coef_avg_ += [self.coef_.copy()]
         self.coef_ = self.getAveragedWeight()
         return False
@@ -279,15 +289,15 @@ class answerset_ranker_t:
 
     def feed(self, x, y):
         h = hashlib.sha1(repr(x)).hexdigest()
-        
+
         if self.trainingHash.has_key(h):
             return
 
         self.trainingExamples += [x]
         self.trainingLabels += [y]
         self.trainingHash[h] = None
-        
-        
+
+
     def poke(self, aspfiles, goldAtoms):
 
         _enum  = self.algo == "batch"
