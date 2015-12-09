@@ -27,18 +27,19 @@ isPronoun(X) :- token(X, _, _, "PRP$", _).
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Mention.
 
-mention(N) :- isNoun(N), not dep("compound", _, N).
+predicted(mention(N)) :- isNoun(N), not dep("compound", _, N).
 pronoun(P) :- isPronoun(P).
 
-number(I, xfNumber(I)) :- mention(I).
+number(I, xfNumber(I)) :- predicted(mention(I)).
 number(I, xfNumber(I)) :- pronoun(I).
-gender(I, xfGender(I)) :- mention(I).
+gender(I, xfGender(I)) :- predicted(mention(I)).
 gender(I, xfGender(I)) :- pronoun(I).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Modifiers.
 negated(X) :- dep("neg", X, _).
+negated(X) :- dep("advmod", X, L), token(L, _, "less", "RBR", _).
 
 % He is cute. A cool guy.
 modify(J, N) :- isAdj(J), dep("nsubj", J, N).
@@ -47,6 +48,12 @@ modify(J, N) :- isAdj(J), dep("amod", N, J).
 % He looks sad. (xcomp(look, sad) + nsubj(look, he))
 modify(J, N) :- isAdj(J), dep("xcomp", V, J), dep("nsubj", V, N).
 
+% She gets scared. (advmod(get, scared) + nsubj(get, she))
+% The dog barked menacingly. (advmod(bark, menacingly) + nsubj(bark, dog))
+modify(J, N) :- dep("advmod", V, J), dep("nsubj", V, N).
+
+% He is scared.
+modify(J, N) :- dep("nsubjpass", J, N), token(V, _, _, "VBN", _).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % ISA.
@@ -55,7 +62,7 @@ modify(J, N) :- isAdj(J), dep("xcomp", V, J), dep("nsubj", V, N).
 isa(X, Xi) :- dep("nsubj", Xi, X), isNoun(Xi).
 
 % He wants to be a friend. (nsubj(want, he) + xcomp(want, friend))
-isa(X, Xi) :- dep("nsubj", V, X), dep("xcomp", V, Xi).
+isa(X, Xi) :- dep("nsubj", V, X), dep("xcomp", V, Xi), isNoun(Xi).
 
 % He is perceived as a good artist. (nsubjpass(perceived, he) + nmod:as(perceived, artist))
 isa(X, Xi) :- dep("nsubjpass", V, X), dep("nmod:as", V, Xi), isNoun(Xi).
@@ -63,30 +70,40 @@ isa(X, Xi) :- dep("nsubjpass", V, X), dep("nmod:as", V, Xi), isNoun(Xi).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Sentiment propagator.
-entitySentimentByModifier(X, S) :- modify(J, X), not negated(J), senti(J, S).
-entitySentimentByModifier(X, xfInvSenti(S)) :- modify(J, X), negated(J), senti(J, S).
+respected(X, xfIsRespected(V, T)) :- isVerb(V), dep(T, V, X), not negated(V).
+respected(X, xfInvRsp(xfIsRespected(V, T))) :- isVerb(V), dep(T, V, X), negated(V).
+
+removed(X, xfShouldBeRemoved(V, T)) :- isVerb(V), dep(T, V, X), not negated(V).
+removed(X, xfInvRsp(xfShouldBeRemoved(V, T))) :- isVerb(V), dep(T, V, X), negated(V).
+
+entitySentimentByModifier(X, xfSenti(N)) :- isa(X, N).
+entitySentimentByModifier(X, xfSenti(J)) :- modify(J, X), not negated(J).
+entitySentimentByModifier(X, xfInvSenti(xfSenti(J))) :- modify(J, X), negated(J).
 
 entitySentimentByModifier(X, S) :- isa(X, Xi), not negated(Xi), entitySentimentByModifier(Xi, S).
 entitySentimentByModifier(X, xfInvSenti(S)) :- isa(X, Xi), negated(Xi), entitySentimentByModifier(Xi, S).
 
-entitySentimentByEventSlot(X, S) :- isVerb(V), dep(T, V, X), slotSenti(V, T, S).
-
-senti(I, xfSenti(I)) :- token(I, _, _, _, _).
-slotSenti(V, T, xfSlotSenti(V, T)) :- token(V, _, _, _, _), dep(T, V, _).
-
+entitySentimentByEventSlot(X, positive) :- canDo(X).
+entitySentimentByEventSlot(X, negative) :- cantDo(X).
+entitySentimentByEventSlot(X, negative) :- hasTooMuch(X).
+entitySentimentByEventSlot(X, xfSenti(Y)) :- has(X, Y).
+entitySentimentByEventSlot(X, xfSlotSenti(V, T)) :- isVerb(V), dep(T, V, X), not negated(V).
+entitySentimentByEventSlot(X, xfInvSenti(xfSlotSenti(V, T))) :- isVerb(V), dep(T, V, X), negated(V).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Output configuration.
+% Linguistic rules.
 
-#show.
+% X have Y
+has(X, Y) :- token(VH, _, "have", _, _), dep("nsubj", VH, X), dep("dobj", VH, Y).
 
-#show token/5.
-#show dep/3.
+% X have lots of Y
+has(X, Y) :- token(VH, _, "have", _, _), dep("nsubj", VH, X), dep("dobj", VH, L), token(L, _, "lot", _, _), dep("nmod:of", L, Y).
 
-#show mention/1.
-#show pronoun/1.
+% X have too many absences = nsubj(have, X) + dobj(have, absences) + amod(absences, many) + advmod(many, too).
+hasTooMuch(X) :- has(X, O), dep("amod", O, J), dep("advmod", J, T), token(T, _, "too", _, _).
 
-#show number/2.
-#show gender/2.
-#show entitySentimentByModifier/2.
-#show entitySentimentByEventSlot/2.
+% X couldn't do
+cantDo(X) :- dep("nsubj", VM, X), negated(VM), dep("aux", VM, VC), token(VC, _, "could", _, _).
+
+% X could do
+canDo(X) :- dep("nsubj", VM, X), not negated(VM), dep("aux", VM, VC), token(VC, _, "could", _, _).

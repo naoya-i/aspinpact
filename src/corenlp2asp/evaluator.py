@@ -2,7 +2,7 @@
 import sys
 sys.path += [".."]
 
-from features import gender, sentimentpolarity, selpref, ncnaive, sentieventslot
+from features import gender, sentimentpolarity, selpref, ncnaive, sentieventslot, googlengram
 
 
 class evaluator_t:
@@ -21,7 +21,11 @@ class evaluator_t:
             "/work/naoya-i/kb/ncnaive0909.0.cdb",
             "/work/naoya-i/kb/tuples.0909.tuples.cdb")
         self.ses = sentieventslot.sentieventslot_t(
-                fn="/home/naoya-i/data/dict/ses.tsv"
+                fn="/home/naoya-i/data/dict/ses.tsv",
+                fnHurting="/home/naoya-i/data/dict/hurting_verbs.tsv",
+                fnHealing="/home/naoya-i/data/dict/healing_verbs.tsv",
+                fnRespect="/home/naoya-i/data/dict/respect_verbs.tsv",
+                fnRemove="/home/naoya-i/data/dict/removing_verbs.tsv",
             )
 
         print >>sys.stderr, "Done."
@@ -71,10 +75,27 @@ class evaluator_t:
         return "neutral"
 
 
+    def _xfInvRsp(self, r):
+        if "yes" == r: return "no"
+        return "unknown"
+
+
     def _xfSlotSenti(self, tk, slot):
         tk = self.doc.tokens[tk]
         slot = slot.replace("nmod:", "prep_")
-        return self.ses.calc("%s-%s" % (tk.lemma, tk.pos[0].lower()), slot)
+        return self.ses.calcHurting("%s-%s" % (tk.lemma, tk.pos[0].lower()), slot)
+
+
+    def _xfIsRespected(self, tk, slot):
+        tk = self.doc.tokens[tk]
+        slot = slot.replace("nmod:", "prep_")
+        return self.ses.isRespected("%s-%s" % (tk.lemma, tk.pos[0].lower()), slot)
+
+
+    def _xfShouldBeRemoved(self, tk, slot):
+        tk = self.doc.tokens[tk]
+        slot = slot.replace("nmod:", "prep_")
+        return self.ses.shouldBeRemoved("%s-%s" % (tk.lemma, tk.pos[0].lower()), slot)
 
 
     def _wfSelpref(self, n, p, vp, t):

@@ -241,6 +241,7 @@ class answerset_ranker_t:
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
         )
+        pClingo.stdin.write(os.popen("grep -v ':~.*\[.*wf.*\]' /home/naoya-i/work/clone/aspinpact/data/theory.pl").read())
         pClingo.stdin.write(tmpf.getvalue())
         pClingo.stdin.close()
 

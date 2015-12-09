@@ -47,7 +47,7 @@ class parser_t:
         self.ev = evaluator.evaluator_t()
 
 
-    def parse(self, fn):
+    def parse(self, fn, fnGoldMention):
         xml   = etree.parse(fn)
         atoms = []
 
@@ -61,10 +61,10 @@ class parser_t:
                 self.ev
             )
 
-        return self.embedStatistics("\n".join(atoms), self.ev)
+        return self.embedStatistics("\n".join(atoms), fnGoldMention, self.ev)
 
 
-    def embedStatistics(self, pl, ev):
+    def embedStatistics(self, pl, fnGoldMention, ev):
 
         fn_preamble = "/home/naoya-i/work/clone/aspinpact/data/theory.pl"
 
@@ -80,6 +80,10 @@ class parser_t:
             stdin=subprocess.PIPE,
         )
         pClingo.stdin.write(open(fn_preamble).read())
+
+        for ln in open(fnGoldMention):
+            print >>pClingo.stdin, "gold(%s)." % ln.strip()
+
         pClingo.stdin.write(pl)
         pClingo.stdin.close()
 
@@ -87,12 +91,21 @@ class parser_t:
 
         #
         # Produce original theory.
-        for ln in open(fn_preamble):
-            if None == regexFeature.search(ln):
-                print >>out, ln.strip()
+        # for ln in open(fn_preamble):
+        #     if None == regexFeature.search(ln):
+        #         print >>out, ln.strip()
+
+        # Add given program.
+        print >>out, "%%%%%%%%%%%%%%%%%%%%%%"
+        print >>out, "% Observations. "
+        print >>out, pl
 
         #
         # Expand statistical features.
+        print >>out, ""
+        print >>out, "%%%%%%%%%%%%%%%%%%%%%%"
+        print >>out, "% Expanded features."
+
         def _eval(m):
             fv, fname, fargs = m.groups()
             fargs1, fargs2   = _decomposeArgs(fargs)
@@ -113,8 +126,15 @@ class parser_t:
                 if None != m:
                     print >>out, regexFeature.sub(_eval, ln.strip())
 
-        # Add given program.
-        print >>out, pl
+
+        #
+        # Write gold mentions.
+        print >>out, ""
+        print >>out, "%%%%%%%%%%%%%%%%%%%%%%"
+        print >>out, "% Gold mentions."
+
+        for ln in open(fnGoldMention):
+            print >>out, "gold(%s)." % ln.strip()
 
         return out.getvalue()
 
@@ -124,6 +144,8 @@ class parser_t:
         def _eval(fname, fargs):
             if hasattr(ev, "_xf%s" % fname):
                 return getattr(ev, "_xf%s" % fname)(*[int(a) if re.match("[-0-9]+", a) else a.strip("\"") for a in fargs.split(",")])
+
+            print >>sys.stderr, "Warning: Not implemented:", fname
 
             return "%s_is_unknown_xf" % fname
 
@@ -141,7 +163,6 @@ class parser_t:
                     a = a.replace(
                         "xf%s(%s)" % (fname, fargs),
                         _eval(fname, fargs))
-                    print >>sys.stderr, fname, fargs, a
 
             new_pl += [a]
 
@@ -168,7 +189,10 @@ class parser_t:
         clingoerr = pClingo.stderr.read()
 
         m = re.search("Answer: 1\n(.*?)\n", clingoret)
-        assert(None != m)
+
+        if None == m:
+            print >>sys.stderr, clingoerr
+            raise Exception("Fatal error occurred in Clingo.")
 
         return [x + "." for x in m.group(1).split(" ")]
 
@@ -203,7 +227,7 @@ class parser_t:
 
 def _convert(fn):
     with open(fn.replace(".txt.corenlp.xml", ".pl"), "w") as out:
-        print >>out, g_parser.parse(fn)
+        print >>out, g_parser.parse(fn, fnGoldMention = fn.replace(".txt.corenlp.xml", ".gold.mentions"))
 
 
 def main(options, args):
