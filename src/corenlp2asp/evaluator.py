@@ -22,10 +22,10 @@ class evaluator_t:
             "/work/naoya-i/kb/tuples.0909.tuples.cdb")
         self.ses = sentieventslot.sentieventslot_t(
                 fn="/home/naoya-i/data/dict/ses.tsv",
-                fnHurting="/home/naoya-i/data/dict/hurting_verbs.tsv",
-                fnHealing="/home/naoya-i/data/dict/healing_verbs.tsv",
-                fnRespect="/home/naoya-i/data/dict/respect_verbs.tsv",
-                fnRemove="/home/naoya-i/data/dict/removing_verbs.tsv",
+                fnHurting="/home/naoya-i/data/dict/hurting_verbs.subjlex.tsv",
+                fnHealing="/home/naoya-i/data/dict/healing_verbs.subjlex.tsv",
+                fnRespect="/home/naoya-i/data/dict/respect_verbs.subjlex.tsv",
+                fnRemove="/home/naoya-i/data/dict/removing_verbs.subjlex.tsv",
             )
 
         print >>sys.stderr, "Done."
