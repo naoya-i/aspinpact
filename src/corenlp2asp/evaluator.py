@@ -25,25 +25,28 @@ class evaluator_t:
         print >>sys.stderr, "Done."
 
 
-    def _wfSelpref(self, n, p, vp, t):
+    #
+    # Feature functions.
+    def numberMatch(self): return 1
+    def genderMatch(self): return 1
+
+
+    def selpref(self, vp, vp_pos, t, n):
         t = t.replace("nsubjpass", "nsubj_pass").replace("nmod:", "prep_")
 
-        if "O" != self.doc.tokens[n].ne:
-            return 0
-
-        sps = self.sp.calc("%s-%s" % (self.doc.tokens[vp].lemma, self.doc.tokens[vp].pos[0].lower()),
+        sps = self.sp.calc("%s-%s" % (vp, vp_pos[0].lower(),),
                            t,
-                           "%s-%s-%s" % (self.doc.tokens[n].lemma, self.doc.tokens[n].pos[0].lower(), self.doc.tokens[n].ne),
+                           "%s-n-O" % (n,),
                            )
         return sps[0]
 
 
-    def _wfESA(self, n, p, vn, tn, vp, tp):
+    def esa(self, vn, vn_pos, tn, vp, vp_pos, tp):
         tn = tn.replace("nmod:", "prep_")
         tp = tp.replace("nmod:", "prep_")
 
-        e1, e2 = "%s-%s:%s" % (self.doc.tokens[vp].lemma, self.doc.tokens[vp].pos[0].lower(), tp), \
-                 "%s-%s:%s" % (self.doc.tokens[vn].lemma, self.doc.tokens[vn].pos[0].lower(), tn)
+        e1, e2 = "%s-%s:%s" % (vp, vp_pos[0].lower(), tp), \
+                 "%s-%s:%s" % (vn, vn_pos[0].lower(), tn)
 
         if e1 > e2: e1, e2 = e2, e1
 
@@ -52,6 +55,8 @@ class evaluator_t:
         return ncs
 
 
+    #
+    # Dynamic value functions.
     def number(self, lemma, pos):
         if "PRP" == pos:
             return "plural" if lemma in ["we", "they", "these", "those"] else "singular"
@@ -70,16 +75,6 @@ class evaluator_t:
         return "neutral"
 
 
-    def xfDeepSenti(self, tk):
-        tk = self.doc.tokens[tk]
-        ret = []
-
-        for rel, label in self.ses.getPol("%s-%s" % (tk.lemma, tk.pos[0].lower())):
-            ret += ["%s(R, T) :- dep(\"%s\", %s, T), dep(\"%s\", %s, R)." % (label, rel, tk.id, self.ses.getRefRel(rel), tk.id)]
-
-        return "\n".join(ret)
-
-
     def senti(self, w):
         s  = self.sen.getAvgPolarity(w)
         t  = 0.1
@@ -90,31 +85,29 @@ class evaluator_t:
         return "0"
 
 
-    def xfInvSenti(self, s):
-        if "positive" == s: return "negative"
-        if "negative" == s: return "positive"
+    def invsenti(self, w):
+        s = self.senti(w)
 
-        return "neutral"
+        if "p" == s: return "n"
+        if "n" == s: return "p"
 
-
-    def xfInvRsp(self, r):
-        if "yes" == r: return "no"
-        return "unknown"
+        return "0"
 
 
-    def xfSlotSenti(self, tk, slot):
-        tk = self.doc.tokens[tk]
-        slot = slot.replace("nmod:", "prep_")
-        return self.ses.calcHurting("%s-%s" % (tk.lemma, tk.pos[0].lower()), slot)
+    def dsTargetArg(self, v, v_pos, dst):
+        for rel, label in self.ses.getPol("%s-%s" % (v, v_pos[0].lower())):
+            if label == dst:
+                if "dobj" == rel:
+                    return ["dobj", "nsubjpass"]
+
+                return rel
+
+        return "n_a"
 
 
-    def xfIsRespected(self, tk, slot):
-        tk = self.doc.tokens[tk]
-        slot = slot.replace("nmod:", "prep_")
-        return self.ses.isRespected("%s-%s" % (tk.lemma, tk.pos[0].lower()), slot)
+    def dsSubArg(self, v, v_pos, dst):
+        for rel, label in self.ses.getPol("%s-%s" % (v, v_pos[0].lower())):
+            if label == dst:
+                return self.ses.getRefRel(rel)
 
-
-    def xfShouldBeRemoved(self, tk, slot):
-        tk = self.doc.tokens[tk]
-        slot = slot.replace("nmod:", "prep_")
-        return self.ses.shouldBeRemoved("%s-%s" % (tk.lemma, tk.pos[0].lower()), slot)
+        return "n_a"

@@ -44,97 +44,22 @@ def _decomposeArgs(a):
 
 
 class parser_t:
-    def __init__(self):
+    def __init__(self, verbose=False):
         self.ev = evaluator.evaluator_t()
+        self.verbose = verbose
 
 
-    def parse(self, fn, fnGoldMention, f_pl2pl=True, f_evalxfs=True):
+    def parse(self, fn, fnGoldMention, picklizeCache=True):
         xml   = etree.parse(fn)
         atoms = []
-        cache = {}
 
         for sent in xml.xpath("/root/document/sentences/sentence"):
-            pl = self.xml2pl(sent)
-            ch = self.cache(pl)
+            atoms += self.xml2pl(sent)
 
-            cache.update(ch)
-            atoms += pl
+        atoms += self.gold2pl(fnGoldMention)
+        cache  = self.cache(atoms)
 
-        return cache, atoms
-
-
-    def embedStatistics(self, pl, fnGoldMention):
-
-        fn_preamble = "/home/naoya-i/work/clone/aspinpact/data/theory.pl"
-
-        #
-        # Embed all possible statistical features.
-        regexFeature = re.compile("\[([-0-9])@.*?wf([A-Za-z_]+)(.*?)\]")
-
-        pClingo = subprocess.Popen(
-            ["/home/naoya-i/tmp/clingo-4.5.3-linux-x86_64/gringo",
-             "--text",
-             ],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE,
-        )
-        pClingo.stdin.write(open(fn_preamble).read())
-
-        for ln in open(fnGoldMention):
-            print >>pClingo.stdin, "gold(%s)." % ln.strip()
-
-        pClingo.stdin.write(pl)
-        pClingo.stdin.close()
-
-        out = cStringIO.StringIO()
-
-        #
-        # Produce original theory.
-        # for ln in open(fn_preamble):
-        #     if None == regexFeature.search(ln):
-        #         print >>out, ln.strip()
-
-        # Add given program.
-        print >>out, "%%%%%%%%%%%%%%%%%%%%%%"
-        print >>out, "% Observations. "
-        print >>out, pl
-
-        #
-        # Expand statistical features.
-        print >>out, ""
-        print >>out, "%%%%%%%%%%%%%%%%%%%%%%"
-        print >>out, "% Expanded features."
-
-        # def _eval(m):
-        #     fv, fname, fargs = m.groups()
-        #     fargs1, fargs2   = _decomposeArgs(fargs)
-        #
-        #     if hasattr(ev, "_wf%s" % fname):
-        #         fv = getattr(ev, "_wf%s" % fname)(*(fargs1+fargs2))
-        #
-        #     # fargs2 affects the feature name.
-        #     if 0 < len(fargs):
-        #         fname += "_" + "_".join(fargs2)
-        #
-        #     return "[f_%s(%s)@1%s]" % (fname, fv, fargs)
-        #
-        # for ln in pClingo.stdout:
-        #     if ln.startswith(":~"):
-        #         m = regexFeature.search(ln)
-        #
-        #         if None != m:
-        #             print >>out, regexFeature.sub(_eval, ln.strip())
-
-        #
-        # Write gold mentions.
-        print >>out, ""
-        print >>out, "%%%%%%%%%%%%%%%%%%%%%%"
-        print >>out, "% Gold mentions."
-
-        for ln in open(fnGoldMention):
-            print >>out, "gold(%s)." % ln.strip()
-
-        return out.getvalue()
+        return "\n".join(atoms), cPickle.dumps(cache, protocol=1)
 
 
     def cache(self, pl):
@@ -144,33 +69,59 @@ class parser_t:
         pClingo = subprocess.Popen(
             ["/home/naoya-i/tmp/gringo-4.5.3-source/build/release/gringo",
              "-t",
+             "-c mode=\"cache\"",
              ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
         )
 
-        print >>pClingo.stdin, "#script (python)"
-        pClingo.stdin.write(open("/home/naoya-i/work/clone/aspinpact/src/corenlp2asp/grmod.py").read())
-        print >>pClingo.stdin, "#end."
-
+        pClingo.stdin.write(open("/home/naoya-i/work/clone/aspinpact/src/corenlp2asp/grimod.py").read())
         pClingo.stdin.write(open("/home/naoya-i/work/clone/aspinpact/data/base.pl").read())
         pClingo.stdin.write("\n".join(pl))
         pClingo.stdin.close()
 
         #
         # Gringo returns a dictionary which represents "to be grounded" facts.
-        clingoret = pClingo.stdout.read().split("\n")[-1]
+        clingoret = pClingo.stdout.read()
         clingoerr = pClingo.stderr.read()
+
+        try:
+            data      = re.findall("RESULT: (.*)", clingoret, flags=re.DOTALL)[0]
+
+        except IndexError:
+            print >>sys.stderr, clingoret
+            print >>sys.stderr, clingoerr
+
+            raise Exception("Oh, Gringo!")
+
+        if self.verbose:
+            print >>sys.stderr, clingoerr
 
         #
         # Calculate each value.
         cache = {}
 
-        for f, args in cPickle.loads(clingoret):
-            cache[(f, args)] = getattr(self.ev, f)(*args)
+        for f, args in cPickle.loads(data):
+            val              = getattr(self.ev, f)(*args)
+            cache[(f, args)] = val
+
+            if self.verbose:
+                print >>sys.stderr, "Cached:", f, args, "=", val
 
         return cache
+
+
+    def gold2pl(self, fnGoldMention):
+        out = cStringIO.StringIO()
+
+        print >>out, "%%%%%%%%%%%%%%%%%%%%%%"
+        print >>out, "% Gold mentions."
+
+        for ln in open(fnGoldMention):
+            print >>out, "gold(%s)." % ln.strip()
+
+        return out.getvalue().split("\n")
 
 
     def xml2pl(self, sent):
@@ -202,11 +153,21 @@ class parser_t:
 
 
 def _convert(fn):
-    with open(fn.replace(".txt.corenlp.xml", ".pl"), "w") as out:
-        print >>out, g_parser.parse(fn, fnGoldMention = fn.replace(".txt.corenlp.xml", ".gold.mentions"))
+    with open(fn.replace(".txt.corenlp.xml", ".pl"), "w") as out_pl:
+        with open(fn.replace(".txt.corenlp.xml", ".pl.pickle"), "w") as out_ch:
+            pl, ch = g_parser.parse(fn, fnGoldMention = fn.replace(".txt.corenlp.xml", ".gold.mentions"))
 
+            out_pl.write(pl)
+            out_ch.write(ch)
+
+
+g_parser = None
 
 def main(options, args):
+    global g_parser
+
+    g_parser = parser_t(verbose=options.verbose)
+
     p = multiprocessing.Pool(options.parallel)
     processed = 0
 
@@ -223,7 +184,6 @@ if "__main__" == __name__:
     cmdparser = optparse.OptionParser(description="Weight Learner for ASP.")
     cmdparser.add_option("--parallel", type=int, default=8, help="The number of parallel processes.")
     cmdparser.add_option("--chunk", type=int, default=50, help="Chunk size of parallel processing.")
-
-    g_parser = parser_t()
+    cmdparser.add_option("--verbose", action="store_true", default=False)
 
     main(*cmdparser.parse_args())

@@ -9,9 +9,15 @@ import itertools
 import sys
 
 
-def mine(fnLP, fnGold, target):
+def mine(fnLP, fnGold, target, verbose=False):
+    args = ["/home/naoya-i/tmp/gringo-4.5.3-source/build/release/gringo",
+    "-t",
+    "-c mode=\"predict\"",
+    "-c cache=\"%s\"" % fnLP.replace(".pl", ".pl.pickle"),
+    ]
+
     p = subprocess.Popen(
-        "/home/naoya-i/tmp/clingo-4.5.3-linux-x86_64/clingo",
+        args,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         stdin=subprocess.PIPE,)
@@ -25,18 +31,22 @@ def mine(fnLP, fnGold, target):
 
     for i, t in enumerate(target):
         lf, var = t
-        p.stdin.write("hook%s(%s) :- %s." % (
-            i, var, lf
-        ))
+        print >>p.stdin, "hook%s(%s) :- %s." % (
+            i, var, lf,
+        )
 
-    # The logic program.
-    for ln in open(fnLP):
-        if "[f_" not in ln:
-            p.stdin.write(ln)
-
+    p.stdin.write(open("/home/naoya-i/work/clone/aspinpact/data/base.pl").read())
+    p.stdin.write(open("/home/naoya-i/work/clone/aspinpact/src/corenlp2asp/grimod.py").read())
+    p.stdin.write(open(fnLP).read())
     p.stdin.close()
 
-    return [(m.group(1), tuple(m.group(2).split(","))) for m in re.finditer("hook([0-9]+)\(([^)]+)\)", p.stdout.read())]
+    clingoret = p.stdout.read()
+
+    if verbose:
+        print >>sys.stderr, p.stderr.read()
+        print >>sys.stderr, clingoret
+
+    return [(m.group(1), tuple(m.group(2).split(","))) for m in re.finditer("hook([0-9]+)\(([^)]+)\)\.", clingoret)]
 
 
 def _wrapedMine(args):

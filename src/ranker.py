@@ -163,95 +163,122 @@ class answerset_ranker_t:
         return self.normalize(vec)
 
 
-    def predict(self, lpfiles, goldAtoms=[], weight=None, lossAugmented=False,
+    def predict(self, lpfiles, cache_file, goldAtoms=[], weight=None, lossAugmented=False,
                 exclude=False, enum=False, eco=False, maximize=True, generationOnly=False):
         assert(isinstance(lpfiles, list))
-
-        regexWeakConstraint = re.compile("^:~(.*?)\[f_(.*?)\(([-0-9.e]+)\)@(.*?)\]")
 
         if weight is None:
             weight = self.coef_ if maximize else -self.coef_
 
-        # Generate feature-weighted answer set program.
-        tmpf = cStringIO.StringIO()
-
-        for fn in lpfiles:
-            for ln in open(fn):
-                m = regexWeakConstraint.search(ln)
-
-                if None == m:
-                    print >>tmpf, ln.strip()
-                    continue
-
-                # To record feature vector.
-                constraint, fname, fvalue, binder = m.group(1).strip(), \
-                                                    m.group(2).strip(), \
-                                                    float(m.group(3).strip()), \
-                                                    ",".join(m.group(4).split(",")[1:]).strip()
-
-                if not self.dv.vocabulary_.has_key(fname) or \
-                    (None != self.ignore_features and None != self.ignore_features.search(fname)):
-
-                    print >>tmpf, "%% LOST: %s" % (ln.strip())
-
-                else:
-                    fidx = self.dv.vocabulary_[fname]
-                    fvalue = self.rescale(fname, fvalue)
-
-                    print >>tmpf, "%% %.3f x %f" % (weight[fidx], fvalue)
-
-                    if not eco:
-                        print >>tmpf, "f_%s(%s, %s) :- %s" % (fname, _sanitize(fvalue), binder, constraint)
-                        print >>tmpf, ":~ f_%s(%s, %s). [%d@1, f_%s, %s]" % (
-                            fname, _sanitize(fvalue), binder,
-                            int(-RESOLUTION*weight[fidx]*fvalue), fname, binder)
-
-                    else:
-                        # If we do not have to recover the feature vector, then.
-                        print >>tmpf, ":~ %s [%d@1, f_%s, %s]" % (
-                            constraint,
-                            int(-RESOLUTION*weight[fidx]*fvalue), fname, binder)
-
-
-        # Constrain the answer set space to one including gold atoms.
-        if len(goldAtoms) > 0:
-            if lossAugmented:
-                for a in goldAtoms:
-                    print >>tmpf, ":~ not %s. [-1@1, lossaug_%s]" % (a, re.sub("[\(\),]", "_", a))
-
-            else:
-                print >>tmpf, "correct :- %s." % (", ".join([a for a in goldAtoms]))
-
-                if exclude: print >>tmpf, ":- correct."
-                else:       print >>tmpf, ":- not correct."
-
-        print >>tmpf, "dummy_always_ensures_optimization."
-        print >>tmpf, ":~ dummy_always_ensures_optimization. [0@1]"
+        args = ["/home/naoya-i/tmp/gringo-4.5.3-source/build/release/clingo",
+        "-n 0",
+        "--opt-mode=optN" if not enum else "--opt-mode=enum",
+        ]
 
         if generationOnly:
-            print tmpf.getvalue()
-            return []
+            args = ["/home/naoya-i/tmp/gringo-4.5.3-source/build/release/gringo",
+            "-t",
+            ]
 
-        # Use clingo to get the prediction. The constructed ASP is given by a standard input.
+        args += ["-c mode=\"predict\"", "-c cache=\"%s\"" % cache_file,
+        "/home/naoya-i/work/clone/aspinpact/src/corenlp2asp/grimod.py",
+        ] + lpfiles
+
         pClingo = subprocess.Popen(
-            ["/home/naoya-i/tmp/clingo-4.5.3-linux-x86_64/clingo",
-             "-n 0",
-             "--opt-mode=optN" if not enum else "--opt-mode=enum",
-             ],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
         )
-        pClingo.stdin.write(os.popen("grep -v ':~.*\[.*wf.*\]' /home/naoya-i/work/clone/aspinpact/data/theory.pl").read())
-        pClingo.stdin.write(tmpf.getvalue())
+
         pClingo.stdin.close()
 
         clingoret = pClingo.stdout.read()
         clingoerr = pClingo.stderr.read()
 
-        m = re.findall("Time         : ([0-9.]+)", clingoret)
+        print >>sys.stderr, clingoerr
+        print >>sys.stderr, clingoret
 
-        if len(m) > 0:
-            self.lastInferenceTime = float(m[0])
+        # Generate feature-weighted answer set program.
+        # tmpf = cStringIO.StringIO()
+        #
+        # for fn in lpfiles:
+        #     for ln in open(fn):
+        #         m = regexWeakConstraint.search(ln)
+        #
+        #         if None == m:
+        #             print >>tmpf, ln.strip()
+        #             continue
+        #
+        #         # To record feature vector.
+        #         constraint, fname, fvalue, binder = m.group(1).strip(), \
+        #                                             m.group(2).strip(), \
+        #                                             float(m.group(3).strip()), \
+        #                                             ",".join(m.group(4).split(",")[1:]).strip()
+        #
+        #         if not self.dv.vocabulary_.has_key(fname) or \
+        #             (None != self.ignore_features and None != self.ignore_features.search(fname)):
+        #
+        #             print >>tmpf, "%% LOST: %s" % (ln.strip())
+        #
+        #         else:
+        #             fidx = self.dv.vocabulary_[fname]
+        #             fvalue = self.rescale(fname, fvalue)
+        #
+        #             print >>tmpf, "%% %.3f x %f" % (weight[fidx], fvalue)
+        #
+        #             if not eco:
+        #                 print >>tmpf, "f_%s(%s, %s) :- %s" % (fname, _sanitize(fvalue), binder, constraint)
+        #                 print >>tmpf, ":~ f_%s(%s, %s). [%d@1, f_%s, %s]" % (
+        #                     fname, _sanitize(fvalue), binder,
+        #                     int(-RESOLUTION*weight[fidx]*fvalue), fname, binder)
+        #
+        #             else:
+        #                 # If we do not have to recover the feature vector, then.
+        #                 print >>tmpf, ":~ %s [%d@1, f_%s, %s]" % (
+        #                     constraint,
+        #                     int(-RESOLUTION*weight[fidx]*fvalue), fname, binder)
+        #
+        #
+        # # Constrain the answer set space to one including gold atoms.
+        # if len(goldAtoms) > 0:
+        #     if lossAugmented:
+        #         for a in goldAtoms:
+        #             print >>tmpf, ":~ not %s. [-1@1, lossaug_%s]" % (a, re.sub("[\(\),]", "_", a))
+        #
+        #     else:
+        #         print >>tmpf, "correct :- %s." % (", ".join([a for a in goldAtoms]))
+        #
+        #         if exclude: print >>tmpf, ":- correct."
+        #         else:       print >>tmpf, ":- not correct."
+        #
+        # print >>tmpf, "dummy_always_ensures_optimization."
+        # print >>tmpf, ":~ dummy_always_ensures_optimization. [0@1]"
+        #
+        # if generationOnly:
+        #     print tmpf.getvalue()
+        #     return []
+        #
+        # # Use clingo to get the prediction. The constructed ASP is given by a standard input.
+        # pClingo = subprocess.Popen(
+        #     ["/home/naoya-i/tmp/clingo-4.5.3-linux-x86_64/clingo",
+        #      "-n 0",
+        #      "--opt-mode=optN" if not enum else "--opt-mode=enum",
+        #      ],
+        #     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        #     stdin=subprocess.PIPE,
+        # )
+        # pClingo.stdin.write(os.popen("grep -v ':~.*\[.*wf.*\]' /home/naoya-i/work/clone/aspinpact/data/theory.pl").read())
+        # pClingo.stdin.write(tmpf.getvalue())
+        # pClingo.stdin.close()
+        #
+        # clingoret = pClingo.stdout.read()
+        # clingoerr = pClingo.stderr.read()
+        #
+        # m = re.findall("Time         : ([0-9.]+)", clingoret)
+        #
+        # if len(m) > 0:
+        #     self.lastInferenceTime = float(m[0])
 
         if enum:
             return [answer_set_t(-1.0*c/RESOLUTION, a) for c, a in extractAnswerSets(clingoret)]
