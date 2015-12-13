@@ -11,42 +11,40 @@ def _tsvToDict(fn, conv):
 
 
 class sentieventslot_t:
-    def __init__(self, fn, fnHurting, fnHealing, fnRespect, fnRemove):
-        self.dbHurtingHealing = collections.defaultdict(int)
-        self.dbRespect        = _tsvToDict(fnRespect, lambda row: [((row[1] + "-v", row[0]), None), None][1 if row[0] == "0" else 0] )
-        self.dbRemove        = _tsvToDict(fnRemove, lambda row: [((row[1] + "-v", row[0]), None), None][1 if row[0] == "0" else 0] )
-
-        for ln in open(fnHurting):
-            ln = ln.strip().split(":")
-
-            if "1" != ln[0]:
-                continue
-
-            self.dbHurtingHealing[("%s-v" % ln[1], "dobj", -1)] = 1
-
-        for ln in open(fnHealing):
-            ln = ln.strip().split(":")
-
-            if "1" != ln[0]:
-                continue
-
-            self.dbHurtingHealing[("%s-v" % ln[1], "dobj", 1)] = 1
-
-        self.db = collections.defaultdict(int)
+    def __init__(self, fn):
+        self.db = collections.defaultdict(list)
+        genre   = None
 
         for row in csv.reader(open(fn), delimiter="\t"):
-            if row[6] != "1": continue
+            if 0 == len(row) or row[0].startswith("#"):
+                continue
 
-            self.db[(row[1], row[2], 1)] += int(row[0])
-            self.db[(row[1], row[4], -1)] += int(row[0])
+            if row[0].startswith(":"):
+                genre = row[0][1:]
+                continue
+
+            if 2 == len(row):
+                self.db[(row[0] + "-v", row[1])] += [genre]
+                self.db[row[0] + "-v"] += [(row[1], genre)]
 
 
-    def isRespected(self, v, r):
-        return "yes" if self.dbRespect.has_key((v, r)) else "unknown"
+    def getArgPol(self, v, r):
+        return self.db.get((v, r), [])
+
+
+    def getPol(self, v):
+        return self.db.get(v, [])
+
+
+    def getRefRel(self, r):
+        if "nsubj" != r:
+            return "nsubj"
+
+        return "dobj"
 
     def shouldBeRemoved(self, v, r):
-        return "yes" if self.dbRemove.has_key((v, r)) else "unknown"
-        
+        return "yes" if self.db.has_key(("hit", v, r)) else "unknown"
+
     def calcHurting(self, v, r):
         if "nsubjpass" == r:
             r = "dobj"

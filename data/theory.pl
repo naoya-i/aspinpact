@@ -23,6 +23,11 @@ mention(N) :- use_gold_mention, gold(mention(N)).
 mention(N) :- not use_gold_mention, predicted(mention(N)).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Deep sentiment theory.
+deepsenti(Y, respect, p) :- respect(X, Y).
+deepsenti(Y, damage, n) :- punish(X, Y).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Regular coreference features.
 
 % Surface feature.

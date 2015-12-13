@@ -44,27 +44,27 @@ def _decomposeArgs(a):
 
 class parser_t:
     def __init__(self):
-        self.ev = evaluator.evaluator_t()
+        pass
 
 
-    def parse(self, fn, fnGoldMention):
+    def parse(self, fn, fnGoldMention, f_pl2pl=True, f_evalxfs=True):
         xml   = etree.parse(fn)
         atoms = []
 
         for sent in xml.xpath("/root/document/sentences/sentence"):
             self.ev.setDoc(sdreader.createDocFromLXML(sent))
 
-            atoms += self.evalXfs(
-                self.pl2pl(
-                    self.xml2pl(sent)
-                ),
-                self.ev
-            )
+            pl = self.xml2pl(sent)
 
-        return self.embedStatistics("\n".join(atoms), fnGoldMention, self.ev)
+            if f_pl2pl: pl = self.pl2pl(pl)
+            if f_evalxfs: pl = self.evalXfs(pl)
+
+            atoms += pl
+
+        return self.embedStatistics("\n".join(atoms), fnGoldMention)
 
 
-    def embedStatistics(self, pl, fnGoldMention, ev):
+    def embedStatistics(self, pl, fnGoldMention):
 
         fn_preamble = "/home/naoya-i/work/clone/aspinpact/data/theory.pl"
 
@@ -126,7 +126,6 @@ class parser_t:
                 if None != m:
                     print >>out, regexFeature.sub(_eval, ln.strip())
 
-
         #
         # Write gold mentions.
         print >>out, ""
@@ -139,7 +138,7 @@ class parser_t:
         return out.getvalue()
 
 
-    def evalXfs(self, pl, ev):
+    def evalXfs(self, pl, ):
 
         def _eval(fname, fargs):
             if hasattr(ev, "_xf%s" % fname):
@@ -164,7 +163,12 @@ class parser_t:
                         "xf%s(%s)" % (fname, fargs),
                         _eval(fname, fargs))
 
-            new_pl += [a]
+            new_a = a.rstrip(".") + "."
+
+            if new_a == ".":
+                continue
+
+            new_pl += [new_a]
 
         return new_pl
 
@@ -174,15 +178,21 @@ class parser_t:
         #
         # Perform deduction.
         pClingo = subprocess.Popen(
-            ["/home/naoya-i/tmp/clingo-4.5.3-linux-x86_64/clingo",
+            ["/home/naoya-i/tmp/gringo-4.5.3-source/build/release/clingo",
              "-n 0",
              "--opt-mode=enum",
              ],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
         )
+
+        print >>pClingo.stdin, "#script (python)"
+        print >>pClingo.stdin, "import sys; sys.path += [\"%s\"]" % "/home/naoya-i/work/clone/aspinpact/src"
+        pClingo.stdin.write(open("/home/naoya-i/work/clone/aspinpact/src/corenlp2asp/evaluator.py").read())
+        print >>pClingo.stdin, "#end."
+
         pClingo.stdin.write(open("/home/naoya-i/work/clone/aspinpact/data/base.pl").read())
-        pClingo.stdin.write(pl)
+        pClingo.stdin.write("\n".join(pl))
         pClingo.stdin.close()
 
         clingoret = pClingo.stdout.read()
@@ -191,7 +201,7 @@ class parser_t:
         m = re.search("Answer: 1\n(.*?)\n", clingoret)
 
         if None == m:
-            print >>sys.stderr, clingoerr
+            print >>sys.stderr, clingoret, clingoerr
             raise Exception("Fatal error occurred in Clingo.")
 
         return [x + "." for x in m.group(1).split(" ")]
@@ -222,7 +232,7 @@ class parser_t:
 
             print >>out, "dep(\"%s\",%s,%s)." % (dep.rel, dep.tk_from, dep.tk_to)
 
-        return out.getvalue()
+        return out.getvalue().split("\n")
 
 
 def _convert(fn):

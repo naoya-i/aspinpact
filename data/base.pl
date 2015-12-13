@@ -1,6 +1,7 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% POS related rules.
+% CoreNLP Token related rules.
+surf(X, W) :- token(X, W, _, _, _).
 
 isNoun(X) :- token(X, _, _, "NN", _).
 isNoun(X) :- token(X, _, _, "NNS", _).
@@ -55,6 +56,7 @@ modify(J, N) :- dep("advmod", V, J), dep("nsubj", V, N).
 % He is scared.
 modify(J, N) :- dep("nsubjpass", J, N), token(V, _, _, "VBN", _).
 
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % ISA.
 
@@ -69,26 +71,29 @@ isa(X, Xi) :- dep("nsubjpass", V, X), dep("nmod:as", V, Xi), isNoun(Xi).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Sentiment propagator.
-respected(X, xfIsRespected(V, T)) :- isVerb(V), dep(T, V, X), not negated(V).
-respected(X, xfInvRsp(xfIsRespected(V, T))) :- isVerb(V), dep(T, V, X), negated(V).
+% Sentiment.
+senti(J, @xfSenti(W)) :- isAdj(J), surf(J, W).
+% xfDeepSenti(V) :- isVerb(V).
 
-removed(X, xfShouldBeRemoved(V, T)) :- isVerb(V), dep(T, V, X), not negated(V).
-removed(X, xfInvRsp(xfShouldBeRemoved(V, T))) :- isVerb(V), dep(T, V, X), negated(V).
-
-entitySentimentByModifier(X, xfSenti(N)) :- isa(X, N).
-entitySentimentByModifier(X, xfSenti(J)) :- modify(J, X), not negated(J).
-entitySentimentByModifier(X, xfInvSenti(xfSenti(J))) :- modify(J, X), negated(J).
-
-entitySentimentByModifier(X, S) :- isa(X, Xi), not negated(Xi), entitySentimentByModifier(Xi, S).
-entitySentimentByModifier(X, xfInvSenti(S)) :- isa(X, Xi), negated(Xi), entitySentimentByModifier(Xi, S).
-
-entitySentimentByEventSlot(X, positive) :- canDo(X).
-entitySentimentByEventSlot(X, negative) :- cantDo(X).
-entitySentimentByEventSlot(X, negative) :- hasTooMuch(X).
-entitySentimentByEventSlot(X, xfSenti(Y)) :- has(X, Y).
-entitySentimentByEventSlot(X, xfSlotSenti(V, T)) :- isVerb(V), dep(T, V, X), not negated(V).
-entitySentimentByEventSlot(X, xfInvSenti(xfSlotSenti(V, T))) :- isVerb(V), dep(T, V, X), negated(V).
+% respected(X, xfIsRespected(V, T)) :- isVerb(V), dep(T, V, X), not negated(V).
+% respected(X, xfInvRsp(xfIsRespected(V, T))) :- isVerb(V), dep(T, V, X), negated(V).
+%
+% removed(X, xfShouldBeRemoved(V, T)) :- isVerb(V), dep(T, V, X), not negated(V).
+% removed(X, xfInvRsp(xfShouldBeRemoved(V, T))) :- isVerb(V), dep(T, V, X), negated(V).
+%
+% entitySentimentByModifier(X, xfSenti(N)) :- isa(X, N).
+% entitySentimentByModifier(X, xfSenti(J)) :- modify(J, X), not negated(J).
+% entitySentimentByModifier(X, xfInvSenti(xfSenti(J))) :- modify(J, X), negated(J).
+%
+% entitySentimentByModifier(X, S) :- isa(X, Xi), not negated(Xi), entitySentimentByModifier(Xi, S).
+% entitySentimentByModifier(X, xfInvSenti(S)) :- isa(X, Xi), negated(Xi), entitySentimentByModifier(Xi, S).
+%
+% entitySentimentByEventSlot(X, positive) :- canDo(X).
+% entitySentimentByEventSlot(X, negative) :- cantDo(X).
+% entitySentimentByEventSlot(X, negative) :- hasTooMuch(X).
+% entitySentimentByEventSlot(X, xfSenti(Y)) :- has(X, Y).
+% entitySentimentByEventSlot(X, xfSlotSenti(V, T)) :- isVerb(V), dep(T, V, X), not negated(V).
+% entitySentimentByEventSlot(X, xfInvSenti(xfSlotSenti(V, T))) :- isVerb(V), dep(T, V, X), negated(V).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Linguistic rules.

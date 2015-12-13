@@ -1,9 +1,7 @@
 
 import sys
-sys.path += [".."]
 
 from features import gender, sentimentpolarity, selpref, ncnaive, sentieventslot, googlengram
-
 
 class evaluator_t:
     def __init__(self):
@@ -21,11 +19,7 @@ class evaluator_t:
             "/work/naoya-i/kb/ncnaive0909.0.cdb",
             "/work/naoya-i/kb/tuples.0909.tuples.cdb")
         self.ses = sentieventslot.sentieventslot_t(
-                fn="/home/naoya-i/data/dict/ses.tsv",
-                fnHurting="/home/naoya-i/data/dict/hurting_verbs.subjlex.tsv",
-                fnHealing="/home/naoya-i/data/dict/healing_verbs.subjlex.tsv",
-                fnRespect="/home/naoya-i/data/dict/respect_verbs.subjlex.tsv",
-                fnRemove="/home/naoya-i/data/dict/removing_verbs.subjlex.tsv",
+                fn="/home/naoya-i/data/dict/pnverbs.tsv",
             )
 
         print >>sys.stderr, "Done."
@@ -33,69 +27,6 @@ class evaluator_t:
 
     def setDoc(self, doc):
         self.doc = doc
-
-
-    def _xfNumber(self, tk):
-        tk = self.doc.tokens[tk]
-
-        if "PRP" == tk.pos:
-            return "plural" if tk.lemma in ["we", "they", "these", "those"] else "singular"
-
-        return "plural" if tk.pos.endswith("S") else "singular"
-
-
-    def _xfGender(self, tk):
-        tk = self.doc.tokens[tk]
-
-        if tk.lemma == "he":  return "male"
-        if tk.lemma == "she": return "female"
-        if tk.lemma == "it": return "thing"
-
-        if tk.ne == "PERSON":
-            return self.gen.getGender(tk.lemma + " !")
-
-        return "neutral"
-
-
-    def _xfSenti(self, tk):
-        tk = self.doc.tokens[tk]
-        s  = self.sen.getAvgPolarity(tk.lemma)
-        t  = 0.1
-
-        if s > t: return "positive"
-        if s < -t: return "negative"
-
-        return "neutral"
-
-
-    def _xfInvSenti(self, s):
-        if "positive" == s: return "negative"
-        if "negative" == s: return "positive"
-
-        return "neutral"
-
-
-    def _xfInvRsp(self, r):
-        if "yes" == r: return "no"
-        return "unknown"
-
-
-    def _xfSlotSenti(self, tk, slot):
-        tk = self.doc.tokens[tk]
-        slot = slot.replace("nmod:", "prep_")
-        return self.ses.calcHurting("%s-%s" % (tk.lemma, tk.pos[0].lower()), slot)
-
-
-    def _xfIsRespected(self, tk, slot):
-        tk = self.doc.tokens[tk]
-        slot = slot.replace("nmod:", "prep_")
-        return self.ses.isRespected("%s-%s" % (tk.lemma, tk.pos[0].lower()), slot)
-
-
-    def _xfShouldBeRemoved(self, tk, slot):
-        tk = self.doc.tokens[tk]
-        slot = slot.replace("nmod:", "prep_")
-        return self.ses.shouldBeRemoved("%s-%s" % (tk.lemma, tk.pos[0].lower()), slot)
 
 
     def _wfSelpref(self, n, p, vp, t):
@@ -123,3 +54,82 @@ class evaluator_t:
         ncs = self.nc.getPMI(e1, e2)
 
         return ncs
+
+print >>sys.stderr,  "HELLO, MY WORLD!!!!"
+
+ev = evaluator_t()
+
+def setDoc(doc):
+    ev.setDoc(doc)
+
+
+def xfNumber(tk):
+    tk = ev.doc.tokens[tk]
+
+    if "PRP" == tk.pos:
+        return "plural" if tk.lemma in ["we", "they", "these", "those"] else "singular"
+
+    return "plural" if tk.pos.endswith("S") else "singular"
+
+
+def xfGender(tk):
+    tk = ev.doc.tokens[tk]
+
+    if tk.lemma == "he":  return "male"
+    if tk.lemma == "she": return "female"
+    if tk.lemma == "it": return "thing"
+
+    if tk.ne == "PERSON":
+        return ev.gen.getGender(tk.lemma + " !")
+
+    return "neutral"
+
+
+def xfDeepSenti(tk):
+    tk = ev.doc.tokens[tk]
+    ret = []
+
+    for rel, label in ev.ses.getPol("%s-%s" % (tk.lemma, tk.pos[0].lower())):
+        ret += ["%s(R, T) :- dep(\"%s\", %s, T), dep(\"%s\", %s, R)." % (label, rel, tk.id, ev.ses.getRefRel(rel), tk.id)]
+
+    return "\n".join(ret)
+
+
+def xfSenti(w):
+    s  = ev.sen.getAvgPolarity(w)
+    t  = 0.1
+
+    if s > t: return "p"
+    if s < -t: return "n"
+
+    return "0"
+
+
+def xfInvSenti(s):
+    if "positive" == s: return "negative"
+    if "negative" == s: return "positive"
+
+    return "neutral"
+
+
+def xfInvRsp(r):
+    if "yes" == r: return "no"
+    return "unknown"
+
+
+def xfSlotSenti(tk, slot):
+    tk = ev.doc.tokens[tk]
+    slot = slot.replace("nmod:", "prep_")
+    return ev.ses.calcHurting("%s-%s" % (tk.lemma, tk.pos[0].lower()), slot)
+
+
+def xfIsRespected(tk, slot):
+    tk = ev.doc.tokens[tk]
+    slot = slot.replace("nmod:", "prep_")
+    return ev.ses.isRespected("%s-%s" % (tk.lemma, tk.pos[0].lower()), slot)
+
+
+def xfShouldBeRemoved(tk, slot):
+    tk = ev.doc.tokens[tk]
+    slot = slot.replace("nmod:", "prep_")
+    return ev.ses.shouldBeRemoved("%s-%s" % (tk.lemma, tk.pos[0].lower()), slot)
