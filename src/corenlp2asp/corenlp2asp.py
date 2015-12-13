@@ -2,6 +2,7 @@
 import sys
 sys.path += ["/home/naoya-i/work/clone/aspinpact/src/"]
 
+import cPickle
 import collections
 import math
 import sdreader
@@ -44,24 +45,22 @@ def _decomposeArgs(a):
 
 class parser_t:
     def __init__(self):
-        pass
+        self.ev = evaluator.evaluator_t()
 
 
     def parse(self, fn, fnGoldMention, f_pl2pl=True, f_evalxfs=True):
         xml   = etree.parse(fn)
         atoms = []
+        cache = {}
 
         for sent in xml.xpath("/root/document/sentences/sentence"):
-            self.ev.setDoc(sdreader.createDocFromLXML(sent))
-
             pl = self.xml2pl(sent)
+            ch = self.cache(pl)
 
-            if f_pl2pl: pl = self.pl2pl(pl)
-            if f_evalxfs: pl = self.evalXfs(pl)
-
+            cache.update(ch)
             atoms += pl
 
-        return self.embedStatistics("\n".join(atoms), fnGoldMention)
+        return cache, atoms
 
 
     def embedStatistics(self, pl, fnGoldMention):
@@ -106,25 +105,25 @@ class parser_t:
         print >>out, "%%%%%%%%%%%%%%%%%%%%%%"
         print >>out, "% Expanded features."
 
-        def _eval(m):
-            fv, fname, fargs = m.groups()
-            fargs1, fargs2   = _decomposeArgs(fargs)
-
-            if hasattr(ev, "_wf%s" % fname):
-                fv = getattr(ev, "_wf%s" % fname)(*(fargs1+fargs2))
-
-            # fargs2 affects the feature name.
-            if 0 < len(fargs):
-                fname += "_" + "_".join(fargs2)
-
-            return "[f_%s(%s)@1%s]" % (fname, fv, fargs)
-
-        for ln in pClingo.stdout:
-            if ln.startswith(":~"):
-                m = regexFeature.search(ln)
-
-                if None != m:
-                    print >>out, regexFeature.sub(_eval, ln.strip())
+        # def _eval(m):
+        #     fv, fname, fargs = m.groups()
+        #     fargs1, fargs2   = _decomposeArgs(fargs)
+        #
+        #     if hasattr(ev, "_wf%s" % fname):
+        #         fv = getattr(ev, "_wf%s" % fname)(*(fargs1+fargs2))
+        #
+        #     # fargs2 affects the feature name.
+        #     if 0 < len(fargs):
+        #         fname += "_" + "_".join(fargs2)
+        #
+        #     return "[f_%s(%s)@1%s]" % (fname, fv, fargs)
+        #
+        # for ln in pClingo.stdout:
+        #     if ln.startswith(":~"):
+        #         m = regexFeature.search(ln)
+        #
+        #         if None != m:
+        #             print >>out, regexFeature.sub(_eval, ln.strip())
 
         #
         # Write gold mentions.
@@ -138,73 +137,40 @@ class parser_t:
         return out.getvalue()
 
 
-    def evalXfs(self, pl, ):
-
-        def _eval(fname, fargs):
-            if hasattr(ev, "_xf%s" % fname):
-                return getattr(ev, "_xf%s" % fname)(*[int(a) if re.match("[-0-9]+", a) else a.strip("\"") for a in fargs.split(",")])
-
-            print >>sys.stderr, "Warning: Not implemented:", fname
-
-            return "%s_is_unknown_xf" % fname
-
-
-        # Ok, recursively replace the external functions.
-        new_pl = []
-
-        for a in pl:
-            while True:
-                toReplaces = re.findall("xf([A-Za-z0-9_]+)\(([^()]+)\)", a)
-
-                if 0 == len(toReplaces): break
-
-                for fname, fargs in toReplaces:
-                    a = a.replace(
-                        "xf%s(%s)" % (fname, fargs),
-                        _eval(fname, fargs))
-
-            new_a = a.rstrip(".") + "."
-
-            if new_a == ".":
-                continue
-
-            new_pl += [new_a]
-
-        return new_pl
-
-
-    def pl2pl(self, pl):
+    def cache(self, pl):
 
         #
-        # Perform deduction.
+        # Ground them.
         pClingo = subprocess.Popen(
-            ["/home/naoya-i/tmp/gringo-4.5.3-source/build/release/clingo",
-             "-n 0",
-             "--opt-mode=enum",
+            ["/home/naoya-i/tmp/gringo-4.5.3-source/build/release/gringo",
+             "-t",
              ],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
         )
 
         print >>pClingo.stdin, "#script (python)"
-        print >>pClingo.stdin, "import sys; sys.path += [\"%s\"]" % "/home/naoya-i/work/clone/aspinpact/src"
-        pClingo.stdin.write(open("/home/naoya-i/work/clone/aspinpact/src/corenlp2asp/evaluator.py").read())
+        pClingo.stdin.write(open("/home/naoya-i/work/clone/aspinpact/src/corenlp2asp/grmod.py").read())
         print >>pClingo.stdin, "#end."
 
         pClingo.stdin.write(open("/home/naoya-i/work/clone/aspinpact/data/base.pl").read())
         pClingo.stdin.write("\n".join(pl))
         pClingo.stdin.close()
 
-        clingoret = pClingo.stdout.read()
+        #
+        # Gringo returns a dictionary which represents "to be grounded" facts.
+        clingoret = pClingo.stdout.read().split("\n")[-1]
         clingoerr = pClingo.stderr.read()
 
-        m = re.search("Answer: 1\n(.*?)\n", clingoret)
+        #
+        # Calculate each value.
+        cache = {}
 
-        if None == m:
-            print >>sys.stderr, clingoret, clingoerr
-            raise Exception("Fatal error occurred in Clingo.")
+        for f, args in cPickle.loads(clingoret):
+            cache[(f, args)] = getattr(self.ev, f)(*args)
 
-        return [x + "." for x in m.group(1).split(" ")]
+        return cache
 
 
     def xml2pl(self, sent):

@@ -31,10 +31,10 @@ isPronoun(X) :- token(X, _, _, "PRP$", _).
 predicted(mention(N)) :- isNoun(N), not dep("compound", _, N).
 pronoun(P) :- isPronoun(P).
 
-number(I, xfNumber(I)) :- predicted(mention(I)).
-number(I, xfNumber(I)) :- pronoun(I).
-gender(I, xfGender(I)) :- predicted(mention(I)).
-gender(I, xfGender(I)) :- pronoun(I).
+number(I, @extfunc(number(L, P))) :- predicted(mention(I)), token(I, _, L, P, _).
+number(I, @extfunc(number(L, P))) :- pronoun(I), token(I, _, L, P, _).
+gender(I, @extfunc(gender(L, N))) :- predicted(mention(I)), token(I, _, L, _, N).
+gender(I, @extfunc(gender(L, N))) :- pronoun(I), token(I, _, L, _, N).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -72,7 +72,7 @@ isa(X, Xi) :- dep("nsubjpass", V, X), dep("nmod:as", V, Xi), isNoun(Xi).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Sentiment.
-senti(J, @xfSenti(W)) :- isAdj(J), surf(J, W).
+senti(J, @extfunc(senti(W))) :- isAdj(J), surf(J, W).
 % xfDeepSenti(V) :- isVerb(V).
 
 % respected(X, xfIsRespected(V, T)) :- isVerb(V), dep(T, V, X), not negated(V).
