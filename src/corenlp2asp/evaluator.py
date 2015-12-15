@@ -3,6 +3,14 @@ import sys
 
 from features import gender, sentimentpolarity, selpref, ncnaive, sentieventslot, googlengram
 
+def _convrel(rel):
+    if "dobj" == rel:
+        return ["dobj", "nsubjpass"]
+    elif "nsubj" == rel:
+        return ["nsubj", "nmod:agent"]
+    else:
+        return [rel.replace("prep_", "nmod:")]
+
 class evaluator_t:
     def __init__(self):
         print >>sys.stderr, "Loading resources..."
@@ -95,12 +103,14 @@ class evaluator_t:
 
 
     def dsTargetArg(self, v, v_pos, dst):
+        ret = []
+
         for rel, label in self.ses.getPol("%s-%s" % (v, v_pos[0].lower())):
             if label == dst:
-                if "dobj" == rel:
-                    return ["dobj", "nsubjpass"]
+                ret += _convrel(rel)
 
-                return rel
+        if 0 < len(ret):
+            return ret
 
         return "n_a"
 
@@ -108,6 +118,6 @@ class evaluator_t:
     def dsSubArg(self, v, v_pos, dst):
         for rel, label in self.ses.getPol("%s-%s" % (v, v_pos[0].lower())):
             if label == dst:
-                return self.ses.getRefRel(rel)
+                return _convrel(self.ses.getRefRel(rel))
 
         return "n_a"

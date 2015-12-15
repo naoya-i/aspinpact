@@ -43,6 +43,13 @@ isPronoun(X) :- token(X, _, _, "PRP$", _).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Dependency complementizer.
+
+% he had to watch = nsubj(had, he) + xcomp(had, watch)
+dep("nsubj", V, X) :- dep("nsubj", Vcat, X), dep("xcomp", Vcat, V).
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Mention.
 predicted(mention(N)) :- isNoun(N), not dep("compound", _, N).
 pronoun(P) :- isPronoun(P).
@@ -57,11 +64,18 @@ gender(I, @extfunc(gender(L, N))) :- pronoun(I), token(I, _, L, _, N).
 % Modifiers.
 negated(X) :- dep("neg", X, _).
 
-% less A
+% less A, rarely A, scarcely A, hardly A, unless A
 negated(X) :- dep("advmod", X, L), token(L, _, "less", "RBR", _).
+negated(X) :- dep("advmod", X, L), token(L, _, "rarely", "RB", _).
+negated(X) :- dep("advmod", X, L), token(L, _, "scarcely", "RB", _).
+negated(X) :- dep("advmod", X, L), token(L, _, "hardly", "RB", _).
+negated(X) :- dep("mark", X, U), token(U, _, "unless", "IN", _).
 
-% no longer be a threat. (advmod(threat, longer) + neg(longer, no))
+% No longer be a threat. (advmod(threat, longer) + neg(longer, no))
 negated(X) :- dep("advmod", X, L), dep("neg", L, _).
+
+% Nobody supports
+negated(X) :- dep("nsubj", X, N), token(N, _, "nobody", "NN", _).
 
 % He is cute. A cool guy.
 modify(J, N) :- isAdj(J), dep("nsubj", J, N).
@@ -76,6 +90,12 @@ modify(J, N) :- dep("advmod", V, J), dep("nsubj", V, N).
 
 % He is scared.
 modify(J, N) :- dep("nsubjpass", J, N), token(V, _, _, "VBN", _).
+
+% He is being mean.
+modify(J, N) :- dep("nsubj", Vbeing, N), dep("xcomp", Vbeing, J).
+
+% A is better than B = nsubj(better, A) + nmod:than(better, B)
+compared(X, Y) :- dep("nsubj", J, X), dep("nmod:than", J, Y), isAdj(J).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -93,50 +113,107 @@ isa(X, Xi) :- dep("nsubjpass", V, X), dep("nmod:as", V, Xi), isNoun(Xi).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Sentiment.
-% senti(J, @extfunc(senti(W))) : isAdj(J), surf(J, W).
 
-deepSentiType("punish").
-deepSentiType("hit").
-deepSentiType("heal").
-deepSentiType("respect").
-deepSentiType("disrespect").
+% Lexicon.
+sentidb(J, @extfunc(senti(WJ))) :- isAdj(J), lemma(J, WJ).
+sentidb(N, @extfunc(senti(WN))) :- isNoun(N), lemma(N, WN).
 
-deepsenti(DST, "focus", V, X) :-
+% Definitions.
+deepsentiEventType("punish").
+deepsentiEventType("hit").
+deepsentiEventType("heal").
+deepsentiEventType("respect").
+deepsentiEventType("disrespect").
+
+invDS("heal", "hit").
+invDS("hit", "heal").
+invDS("heal", "hit").
+invDS("hit", "heal").
+invDS("respect", "disrespect").
+invDS("disrespect", "respect").
+
+invSenti("p", "n").
+invSenti("n", "p").
+
+% Rules.
+deepsentiEvent(DST, "focus", V, X) :-
   isVerb(V), isNoun(X),
   token(V, _, W_V, P_V, _),
+  not negated(V),
   dep(@extfunc(dsTargetArg(W_V, P_V, DST)), V, X),
-  deepSentiType(DST).
+  deepsentiEventType(DST).
 
-deepsenti(DST, "reference", V, X) :-
+deepsentiEvent(INVDST, "focus", V, X) :-
   isVerb(V), isNoun(X),
   token(V, _, W_V, P_V, _),
+  negated(V),
+  dep(@extfunc(dsTargetArg(W_V, P_V, DST)), V, X),
+  deepsentiEventType(DST),
+  invDS(DST, INVDST).
+
+deepsentiEvent(DST, "reference", V, X) :-
+  isVerb(V), isNoun(X),
+  token(V, _, W_V, P_V, _),
+  not negated(V),
   dep(@extfunc(dsSubArg(W_V, P_V, DST)), V, X),
-  deepSentiType(DST).
+  deepsentiEventType(DST).
 
-senti(X, @extfunc(senti(WN))) :- isa(X, N), not negated(N), lemma(N, WN).
-senti(X, @extfunc(invsenti(WN))) :- isa(X, N), negated(N), lemma(N, WN).
-senti(X, @extfunc(senti(WJ))) :- modify(J, X), not negated(J), lemma(J, WJ).
-senti(X, @extfunc(invsenti(WJ))) :- modify(J, X), negated(J), lemma(J, WJ).
+deepsentiEvent(INVDST, "reference", V, X) :-
+  isVerb(V), isNoun(X),
+  token(V, _, W_V, P_V, _),
+  negated(V),
+  dep(@extfunc(dsSubArg(W_V, P_V, DST)), V, X),
+  deepsentiEventType(DST),
+  invDS(DST, INVDST).
 
-% senti(X, S) :- isa(X, Xi), not negated(Xi), senti(Xi, S).
-% senti(X, @invsenti(S)) :- isa(X, Xi), negated(Xi), senti(Xi, S).
 
+% Deep sentiment theory.
+deepsenti(X, "respect", "p") :- deepsentiEvent("respect", "focus", V, X).
+deepsenti(X, "respect", "n") :- deepsentiEvent("disrespect", "focus", V, X).
+deepsenti(X, "damage", "n") :- deepsentiEvent("punish", "focus", V, X).
+deepsenti(X, "damage", "n") :- deepsentiEvent("hit", "focus", V, X).
+deepsenti(X, "strength", "p") :- deepsentiEvent("heal", "focus", V, X).
+
+% threat
+senti(X, S) :- isNoun(X), sentidb(X, S), S != "0".
+
+% better candidate, he is cute
+senti(X, S) :- isNoun(X), not negated(J), modify(J, X), not too(J), sentidb(J, S), S != "0".
+
+% he is not cute.
+senti(X, S) :- isNoun(X), negated(J), modify(J, X), not too(J), sentidb(J, Si), invSenti(S, Si).
+
+% he is too shy.
+senti(X, "n") :- isNoun(X), not negated(J), modify(J, X), too(J).
+
+% he is a threat.
+senti(X, S) :- isNoun(X), isa(X, Xi), not negated(Xi), senti(Xi, S), S != "0".
+
+% he is not a threat.
+senti(X, S) :- isNoun(X), isa(X, Xi), negated(Xi), senti(Xi, Si), invSenti(S, Si).
+
+% it has a virus.
+senti(X, S) :- isNoun(X), has(X, Xi, V), not negated(V), senti(Xi, S), S != "0".
+
+% it does not have a virus.
+senti(X, S) :- isNoun(X), has(X, Xi, V), negated(V), senti(Xi, S), S != "0".
+
+% B: it is better than B
+senti(X, S) :- isNoun(X), compared(Xfoc, X), senti(Xfoc, Si), invSenti(S, Si).
 
 % entitySentimentByEventSlot(X, positive) :- canDo(X).
 % entitySentimentByEventSlot(X, negative) :- cantDo(X).
 % entitySentimentByEventSlot(X, negative) :- hasTooMuch(X).
-% entitySentimentByEventSlot(X, xfSenti(Y)) :- has(X, Y).
-% entitySentimentByEventSlot(X, xfSlotSenti(V, T)) :- isVerb(V), dep(T, V, X), not negated(V).
-% entitySentimentByEventSlot(X, xfInvSenti(xfSlotSenti(V, T))) :- isVerb(V), dep(T, V, X), negated(V).
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Linguistic rules.
 
 % X have Y
-has(X, Y) :- token(VH, _, "have", _, _), dep("nsubj", VH, X), dep("dobj", VH, Y).
+has(X, Y, VH) :- token(VH, _, "have", _, _), dep("nsubj", VH, X), dep("dobj", VH, Y).
 
 % X have lots of Y
-has(X, Y) :- token(VH, _, "have", _, _), dep("nsubj", VH, X), dep("dobj", VH, L), token(L, _, "lot", _, _), dep("nmod:of", L, Y).
+has(X, Y, VH) :- token(VH, _, "have", _, _), dep("nsubj", VH, X), dep("dobj", VH, L), token(L, _, "lot", _, _), dep("nmod:of", L, Y).
 
 % X have too many absences = nsubj(have, X) + dobj(have, absences) + amod(absences, many) + advmod(many, too).
 hasTooMuch(X) :- has(X, O), dep("amod", O, J), dep("advmod", J, T), token(T, _, "too", _, _).
@@ -146,6 +223,9 @@ cantDo(X) :- dep("nsubj", VM, X), negated(VM), dep("aux", VM, VC), token(VC, _, 
 
 % X could do
 canDo(X) :- dep("nsubj", VM, X), not negated(VM), dep("aux", VM, VC), token(VC, _, "could", _, _).
+
+% too strict = advmod(strict, too)
+too(J) :- dep("advmod", J, T), token(T, _, "too", "RB", _).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -159,12 +239,6 @@ N<P :- pronominalized(N, P).
 % mention(N) :- predictedMention(N).
 mention(N) :- use_gold_mention, gold(mention(N)).
 mention(N) :- not use_gold_mention, predicted(mention(N)).
-
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Deep sentiment theory.
-deepsenti(Y, respect, p) :- respect(X, Y).
-deepsenti(Y, damage, n) :- punish(X, Y).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -193,11 +267,11 @@ deepsenti(Y, damage, n) :- punish(X, Y).
 % :~ pronominalized(N, P), S != neutral, entitySentimentByModifier(N, S), entitySentimentByEventSlot(P, S). [1@1, wfSentimentGuessMatch_ESM, N, P]
 % :~ pronominalized(N, P), S != neutral, entitySentimentByEventSlot(N, S), entitySentimentByEventSlot(P, S). [1@1, wfSentimentGuessMatch_ES, N, P]
 % :~ pronominalized(N, P), S != neutral, entitySentimentByModifier(N, S), entitySentimentByModifier(P, S). [1@1, wfSentimentGuessMatch_M, N, P]
-:~ pronominalized(N, P), respected(N, yes), entitySentimentByModifier(P, positive). [1@1, wfRespectSomethingPositive, N, P]
-:~ pronominalized(N, P), respected(N, yes), entitySentimentByEventSlot(P, positive). [1@1, wfRespectSomethingPositive, N, P]
-:~ pronominalized(N, P), removed(N, yes), entitySentimentByModifier(P, negative). [1@1, wfRemoveSomethingNegative, N, P]
-:~ pronominalized(N, P), removed(N, yes), entitySentimentByEventSlot(P, negative). [1@1, wfRemoveSomethingNegative, N, P]
-:~ pronominalized(N, P), entitySentimentByEventSlot(N, S), entitySentimentByEventSlot(P, S), S != neutral. [1@1, wfSentimentFromESmatch, N, P]
+% :~ pronominalized(N, P), respected(N, yes), entitySentimentByModifier(P, positive). [1@1, wfRespectSomethingPositive, N, P]
+% :~ pronominalized(N, P), respected(N, yes), entitySentimentByEventSlot(P, positive). [1@1, wfRespectSomethingPositive, N, P]
+% :~ pronominalized(N, P), removed(N, yes), entitySentimentByModifier(P, negative). [1@1, wfRemoveSomethingNegative, N, P]
+% :~ pronominalized(N, P), removed(N, yes), entitySentimentByEventSlot(P, negative). [1@1, wfRemoveSomethingNegative, N, P]
+% :~ pronominalized(N, P), entitySentimentByEventSlot(N, S), entitySentimentByEventSlot(P, S), S != neutral. [1@1, wfSentimentFromESmatch, N, P]
 
 % Selectional preference.
 :~ pronominalized(N, P),

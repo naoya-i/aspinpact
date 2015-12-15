@@ -22,9 +22,9 @@ class grimod_t:
             self.cache[(fun.name(), tuple(fun.args()))] = 0
 
         if grimod_t.Predict == self.mode:
-            return self.cache.get((fun.name(), tuple(fun.args())), 0)
+            return self.cache.get((fun.name(), tuple(fun.args())), [])
 
-        return 0
+        return []
 
 
     def featfunc(self, fun):

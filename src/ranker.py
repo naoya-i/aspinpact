@@ -196,7 +196,10 @@ class answerset_ranker_t:
         clingoret = pClingo.stdout.read()
         clingoerr = pClingo.stderr.read()
 
-        print >>sys.stderr, clingoerr
+        if generationOnly:
+            print >>sys.stderr, clingoerr
+            return clingoret.split("\n")
+
         print >>sys.stderr, clingoret
 
         # Generate feature-weighted answer set program.
