@@ -90,16 +90,29 @@ class evaluator_t:
         if s > t: return "p"
         if s < -t: return "n"
 
-        return "0"
+        return []
 
 
-    def invsenti(self, w):
-        s = self.senti(w)
+    def wi05senti(self, w):
+        sc = self.sen.getPolarity(w, self.sen.wi05, None)
+        return {1: "p", -1: "n", None: []}.get(sc, [])
 
-        if "p" == s: return "n"
-        if "n" == s: return "p"
 
-        return "0"
+    def g13ppvsenti(self, lemma):
+        return self.ses.getG13Pol(lemma)
+
+
+    def c14ewnsenti(self, lemma):
+        return self.ses.getC14Pol(lemma)
+
+
+    def fgafstsenti(self, lemma):
+        ret = self.ses.getFineGrainedAS(lemma)
+
+        if len(ret) > 0 and ret[0][1] == "dobj":
+            return ret + [(ret[0][0], "nsubjpass")]
+
+        return self.ses.getFineGrainedAS(lemma)
 
 
     def dsTargetArg(self, v, v_pos, dst):

@@ -10,8 +10,8 @@ import sys
 
 
 def mine(fnLP, fnGold, target, verbose=False):
-    args = ["/home/naoya-i/tmp/gringo-4.5.3-source/build/release/gringo",
-    "-t",
+    args = ["/home/naoya-i/tmp/gringo-4.5.3-source/build/release/clingo",
+    "-n 1",
     "-c mode=\"predict\"",
     "-c cache=\"%s\"" % fnLP.replace(".pl", ".pl.pickle"),
     ]
@@ -46,12 +46,12 @@ def mine(fnLP, fnGold, target, verbose=False):
         print >>sys.stderr, p.stderr.read()
         print >>sys.stderr, clingoret
 
-    return [(m.group(1), tuple(m.group(2).split(","))) for m in re.finditer("hook([0-9]+)\(([^)]+)\)\.", clingoret)]
+    return [(m.group(1), tuple(m.group(2).split(","))) for m in re.finditer("hook([0-9]+)\(([^)]+)\)", clingoret)]
 
 
 def _wrapedMine(args):
     fnLP, fnGold, target = args
-    return fnLP, mine(fnLP, fnGold, target)
+    return fnLP, mine(fnLP, fnGold, target) #, verbose=True)
 
 
 def paraMine(args, testers, chunk=50, parallel=4):
@@ -67,9 +67,13 @@ def paraMine(args, testers, chunk=50, parallel=4):
         for fn, ret in p.map(_wrapedMine, [(fn, fn.replace(".pl", ".gold.interp"), [x[1] for x in testers]) for fn in fns if None != fn]):
 
             dist = [""] * (1+len(testers))
+            cell = collections.defaultdict(list)
 
             for j, instances in ret:
-                dist[1+int(j)] = ",".join(instances)
+                cell[1+int(j)] += [",".join(instances)]
+
+            for j in cell:
+                dist[j] = "/".join(cell[j])
 
             dist[0] = open(fn.replace(".pl", ".txt")).read().strip()
 

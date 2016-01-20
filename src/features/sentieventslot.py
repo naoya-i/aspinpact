@@ -10,8 +10,33 @@ def _tsvToDict(fn, conv):
     return dict([conv(row) for row in csv.reader(open(fn), delimiter="\t") if None != conv(row)])
 
 
+def _mtsvToDict(fn):
+    d = {}
+
+    for row in csv.reader(open(fn), delimiter="\t"):
+        for ent in row[2].split(","):
+            if "+Effect" == row[1]: d[ent] = "p"
+            if "-Effect" == row[1]: d[ent] = "n"
+
+    return d
+
+
+def _read(fn, val):
+    return dict([(ln.strip(), val) for ln in open(fn)])
+
+
 class sentieventslot_t:
-    def __init__(self, fn):
+    def __init__(self, fn, di_ppv = "/home/naoya-i/dict/goyal13_PPV", fn_ewn = "/home/naoya-i/dict/effectwordnet/merged.tff"):
+
+        #
+        # Read Goyal 13 et al.'s PPV lexicon.
+        self.ppv = _read(os.path.join(di_ppv, "KindAgentRatio1"), "p")
+        self.ppv.update(_read(os.path.join(di_ppv, "EvilAgentRatio1"), "n"))
+        self.ppv.update(_read(os.path.join(di_ppv, "PosBasilisk"), "p"))
+        self.ppv.update(_read(os.path.join(di_ppv, "NegBasilisk"), "n"))
+
+        self.ewn = _mtsvToDict(fn_ewn)
+
         self.db = collections.defaultdict(list)
         genre   = None
 
@@ -24,8 +49,12 @@ class sentieventslot_t:
                 continue
 
             if 2 == len(row):
-                self.db[(row[0] + "-v", row[1])] += [genre]
-                self.db[row[0] + "-v"] += [(row[1], genre)]
+                self.db[(row[0], row[1])] += [genre]
+                self.db[row[0]] += [(genre, row[1])]
+
+
+    def getFineGrainedAS(self, v):
+        return self.db.get(v, [])
 
 
     def getArgPol(self, v, r):
@@ -34,6 +63,14 @@ class sentieventslot_t:
 
     def getPol(self, v):
         return self.db.get(v, [])
+
+
+    def getG13Pol(self, v):
+        return self.ppv.get(v, [])
+
+
+    def getC14Pol(self, v):
+        return self.ewn.get(v, [])
 
 
     def getRefRel(self, r):
